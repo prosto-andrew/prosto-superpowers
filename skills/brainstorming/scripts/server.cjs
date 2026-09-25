@@ -208,7 +208,7 @@ const helperInjection = '<script>\n' + helperScript + '\n</script>';
 function readSuperpowersVersion() {
   const root = path.join(__dirname, '../../..');
   const manifests = [
-    path.join(root, 'package.json'),
+    path.join(root, '.claude-plugin/plugin.json'),
     path.join(root, '.codex-plugin/plugin.json')
   ];
 
@@ -217,7 +217,7 @@ function readSuperpowersVersion() {
       const data = JSON.parse(fs.readFileSync(manifest, 'utf-8'));
       if (data.version) return String(data.version);
     } catch (e) {
-      // Packaged Codex plugins omit package.json; try the next manifest.
+      // A harness may ship only its own manifest; try the next one.
     }
   }
 
