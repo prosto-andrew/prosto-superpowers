@@ -203,3 +203,5 @@ You understand 1,2,3,6. Unclear on 4,5.
 ## GitHub Thread Replies
 
 When replying to inline review comments on GitHub, reply in the comment thread (`gh api repos/{owner}/{repo}/pulls/{pr}/comments/{id}/replies`), not as a top-level PR comment.
+
+**Network commands need their own yes.** Before running any command that sends data off this machine or downloads onto it (`git pull`, `git push`, creating a PR, `gh api`, a package install), show your human partner the exact command and what it sends or fetches, then wait for an explicit yes. Ask once per command: approval for one does not cover the next. For a reply, show the full text you will post and the thread it goes to.

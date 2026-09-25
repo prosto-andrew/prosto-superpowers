@@ -83,6 +83,8 @@ is theirs.
 
 ## Step 5: Execute Choice
 
+**Network commands need their own yes.** Before running any command that sends data off this machine or downloads onto it (`git pull`, `git push`, creating a PR, `gh api`, a package install), show your human partner the exact command and what it sends or fetches, then wait for an explicit yes. Ask once per command: approval for one does not cover the next. The menu choice says which path to take; it is not that yes.
+
 ### Option 1: Merge Locally
 
 ```bash
@@ -92,7 +94,7 @@ cd "$MAIN_ROOT"
 
 # Merge first — verify success before removing anything
 git checkout <base-branch>
-git pull
+git pull   # network: ask first (see above)
 git merge <feature-branch>
 
 # Verify tests on merged result
@@ -111,6 +113,8 @@ git branch -d <feature-branch>
 ```
 
 ### Option 2: Push and Create PR
+
+Both the push and the PR creation are network commands: ask before each.
 
 ```bash
 git push -u origin <feature-branch>

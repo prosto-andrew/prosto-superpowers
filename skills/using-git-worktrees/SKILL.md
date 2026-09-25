@@ -101,7 +101,9 @@ cd "$path"
 
 ## Step 2: Project Setup
 
-Auto-detect and run appropriate setup:
+Auto-detect the appropriate setup command. Every one of these downloads packages and may run their install scripts, so:
+
+**Network commands need their own yes.** Before running any command that sends data off this machine or downloads onto it (`git pull`, `git push`, creating a PR, `gh api`, a package install), show your human partner the exact command and what it sends or fetches, then wait for an explicit yes. Ask once per command: approval for one does not cover the next.
 
 ```bash
 # Node.js
