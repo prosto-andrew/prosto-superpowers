@@ -229,8 +229,6 @@ mkdir -p "$TEST_DIR/survival"
 echo "  Starting server (will wait ~75s to verify survival past lifecycle check)..."
 
 BRAINSTORM_DIR="$TEST_DIR/survival" \
-BRAINSTORM_HOST="127.0.0.1" \
-BRAINSTORM_URL_HOST="localhost" \
 BRAINSTORM_OWNER_PID="" \
 BRAINSTORM_PORT=$((49152 + RANDOM % 16383)) \
   node "$SERVER_SCRIPT" > "$TEST_DIR/survival/.server.log" 2>&1 &
@@ -293,8 +291,6 @@ while kill -0 "$BAD_PID" 2>/dev/null; do
 done
 
 BRAINSTORM_DIR="$TEST_DIR/control" \
-BRAINSTORM_HOST="127.0.0.1" \
-BRAINSTORM_URL_HOST="localhost" \
 BRAINSTORM_OWNER_PID="$BAD_PID" \
 BRAINSTORM_PORT=$((49152 + RANDOM % 16383)) \
   node "$SERVER_SCRIPT" > "$TEST_DIR/control/.server.log" 2>&1 &
@@ -347,8 +343,6 @@ STOP_TEST_ID="$(printf 'windowsstop%021d\n' "$RANDOM")"
 printf '%s\n' "$STOP_TEST_ID" > "$TEST_DIR/stop-test/state/server-instance-id"
 
 BRAINSTORM_DIR="$TEST_DIR/stop-test" \
-BRAINSTORM_HOST="127.0.0.1" \
-BRAINSTORM_URL_HOST="localhost" \
 BRAINSTORM_OWNER_PID="" \
 BRAINSTORM_PORT=$((49152 + RANDOM % 16383)) \
   node "$SERVER_SCRIPT" "--brainstorm-server-id=$STOP_TEST_ID" > "$TEST_DIR/stop-test/.server.log" 2>&1 &

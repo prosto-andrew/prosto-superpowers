@@ -92,16 +92,7 @@ bash scripts/start-server.sh --project-dir /path/to/project --open --foreground
 
 **Other environments:** The server must keep running in the background across conversation turns. If your environment reaps detached processes, use `--foreground` and launch the command with your platform's background execution mechanism.
 
-If the URL is unreachable from your browser (common in remote/containerized setups), bind a non-loopback host:
-
-```bash
-bash scripts/start-server.sh \
-  --project-dir /path/to/project \
-  --host 0.0.0.0 \
-  --url-host localhost
-```
-
-Use `--url-host` to control what hostname is printed in the returned URL JSON.
+The server only ever binds `127.0.0.1`. If the browser runs on a different machine (remote or containerized setups), ask your human partner to forward the port over SSH (`ssh -L <port>:127.0.0.1:<port> <host>`) rather than exposing the server.
 
 ## The Loop
 
@@ -275,7 +266,8 @@ If `$STATE_DIR/events` doesn't exist, the user didn't interact with the browser 
 - **Explain the question on each page** — "Which layout feels more professional?" not just "Pick one"
 - **Iterate before advancing** — if feedback changes current screen, write a new version
 - **2-4 options max** per screen
-- **Use real content when it matters** — for a photography portfolio, use actual images (Unsplash). Placeholder content obscures design issues.
+- **Use real content when it matters** — for a photography portfolio, ask your human partner for a few sample images and copy them into `screen_dir`, or draw them as inline SVG. Placeholder content obscures design issues.
+- **No external resources** — every image, font, stylesheet and script comes from `screen_dir` or is inline. The server's Content-Security-Policy blocks remote URLs, so a screen that links one renders broken instead of loading it.
 - **Keep mockups simple** — focus on layout and structure, not pixel-perfect design
 
 ## File Naming

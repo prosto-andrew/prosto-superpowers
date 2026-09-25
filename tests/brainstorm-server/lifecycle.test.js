@@ -57,15 +57,6 @@ function firstServerStarted(out) {
   return JSON.parse(out.trim().split('\n').find(l => l.includes('server-started')));
 }
 
-function openCaptureCommand(dir, marker) {
-  const scriptPath = path.resolve(dir, 'capture-open.cjs');
-  const markerPath = path.resolve(marker);
-  fs.writeFileSync(scriptPath,
-    "const fs = require('fs');\n" +
-    "fs.appendFileSync(process.argv[2], process.argv[3] + '\\n');\n");
-  return `node ${JSON.stringify(scriptPath)} ${JSON.stringify(markerPath)}`;
-}
-
 function httpStatus(port, key) {
   return new Promise(resolve => {
     const pathWithKey = key ? '/?key=' + encodeURIComponent(key) : '/';
@@ -187,30 +178,6 @@ async function runTests() {
         await killAndWait(startProcess);
       }
       removeShellPath(dir);
-    }
-  });
-
-  await test('server-started URL brackets IPv6 URL hosts', async () => {
-    const dir = fs.mkdtempSync('/tmp/bs-ipv6-url-');
-    const srv = spawn('node', [SERVER], {
-      env: {
-        ...process.env,
-        BRAINSTORM_PORT: 3421,
-        BRAINSTORM_HOST: '127.0.0.1',
-        BRAINSTORM_URL_HOST: '::1',
-        BRAINSTORM_TOKEN: 'ipv6token',
-        BRAINSTORM_DIR: dir,
-        BRAINSTORM_LIFECYCLE_CHECK_MS: 100000
-      }
-    });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
-    try {
-      for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
-      const info = firstServerStarted(out);
-      assert.strictEqual(info.url, 'http://[::1]:3421/?key=ipv6token');
-    } finally {
-      await killAndWait(srv);
-      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 
@@ -447,8 +414,8 @@ async function runTests() {
   await test('auto-opens the browser once, on the first screen', async () => {
     const dir = fs.mkdtempSync('/tmp/bs-open-');
     const marker = path.join(dir, 'opened.log');
-    const openCmd = openCaptureCommand(dir, marker); // capture the launch instead of opening a browser
-    const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3417, BRAINSTORM_DIR: dir, BRAINSTORM_OPEN: '1', BRAINSTORM_OPEN_CMD: openCmd, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
+    // BRAINSTORM_OPEN_LOG records the launch URL instead of opening a browser.
+    const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3417, BRAINSTORM_DIR: dir, BRAINSTORM_OPEN: '1', BRAINSTORM_OPEN_LOG: marker, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
     let out = ''; srv.stdout.on('data', d => out += d.toString());
     for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
 
@@ -477,9 +444,8 @@ async function runTests() {
   await test('does NOT auto-open unless approved (BRAINSTORM_OPEN unset)', async () => {
     const dir = fs.mkdtempSync('/tmp/bs-open-');
     const marker = path.join(dir, 'opened.log');
-    const openCmd = openCaptureCommand(dir, marker);
     // BRAINSTORM_OPEN intentionally NOT set — auto-open must stay off.
-    const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3418, BRAINSTORM_DIR: dir, BRAINSTORM_OPEN_CMD: openCmd, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
+    const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3418, BRAINSTORM_DIR: dir, BRAINSTORM_OPEN_LOG: marker, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
     let out = ''; srv.stdout.on('data', d => out += d.toString());
     for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
     fs.writeFileSync(path.join(dir, 'content', 'first.html'), '<h2>First</h2>');

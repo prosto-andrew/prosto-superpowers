@@ -4,7 +4,7 @@ hooks/session-start text eol=lf
 
 # Extensionless bash helpers the skills call with `bash scripts/...`.
 # Without this, core.autocrlf=true checks them out as CRLF and bash fails
-# on `set -euo pipefail`.
+# on the carriage return after `set -euo pipefail`.
 skills/*/scripts/* text eol=lf
 *.cjs text eol=lf
 *.py text eol=lf

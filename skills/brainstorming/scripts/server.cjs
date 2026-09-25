@@ -97,26 +97,20 @@ function preferredPort() {
   return randomPort();
 }
 let PORT = preferredPort();
-const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
-const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'localhost' : HOST);
+// Loopback only, by design of this fork: the companion is never reachable from
+// another host, so nothing it renders can be read off this machine. SSH port
+// forwarding to 127.0.0.1 still works for remote sessions.
+const HOST = '127.0.0.1';
+const URL_HOST = 'localhost';
 const SESSION_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
 const CONTENT_DIR = path.join(SESSION_DIR, 'content');
 const STATE_DIR = path.join(SESSION_DIR, 'state');
 const SUPERPOWERS_VERSION = readSuperpowersVersion();
-const SUPERPOWERS_BRAND_IMAGE_URL = 'https://primeradiant.com/brand/superpowers-visual-brainstorming-logo.png';
-const TELEMETRY_DISABLE_ENV_VARS = [
-  'SUPERPOWERS_DISABLE_TELEMETRY',
-  'DISABLE_TELEMETRY',
-  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'
-];
-const SUPERPOWERS_TELEMETRY_DISABLED = TELEMETRY_DISABLE_ENV_VARS.some(name => isTruthyEnv(process.env[name]));
 let ownerPid = process.env.BRAINSTORM_OWNER_PID ? Number(process.env.BRAINSTORM_OWNER_PID) : null;
 
-// Per-session secret key. The companion is reachable by any local browser tab
-// and, when bound to a non-loopback host, by any host that can route to it.
-// The key authenticates the real client uniformly across loopback, tunnel, and
-// remote binds — and defeats DNS rebinding — where a Host/Origin allowlist
-// cannot. It rides the served URL as ?key= and is mirrored into a cookie on
+// Per-session secret key. The companion is reachable by any local browser tab.
+// The key authenticates the real client — and defeats DNS rebinding — where a
+// Host/Origin allowlist cannot. It rides the served URL as ?key= and is mirrored into a cookie on
 // first load so same-origin subresources and the WebSocket carry it for free.
 // Persisted alongside the port (BRAINSTORM_TOKEN_FILE) so a restart keeps the
 // same key and an already-open tab's cookie still validates.
@@ -166,9 +160,7 @@ function waitingPage() {
 body { font-family: system-ui, sans-serif; padding: 2rem; max-width: 800px; margin: 0 auto; }
 h1 { color: #333; } p { color: #666; }
 .brand { display: flex; align-items: center; min-width: 0; overflow: hidden; margin-bottom: 1.5rem; color: #666; font-size: 0.9rem; line-height: 1; }
-.brand a { color: inherit; text-decoration: none; display: flex; align-items: center; gap: 0.5rem; min-width: 0; max-width: 100%; line-height: 1; }
 .brand-copy { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1; transform: translateY(-1px); }
-.brand-logo { display: block; height: 1em; width: auto; max-width: 180px; filter: invert(1); }
 </style>
 </head>
 <body><!-- BRANDING --><h1>Brainstorm Companion</h1>
@@ -224,13 +216,6 @@ function readSuperpowersVersion() {
   return 'unknown';
 }
 
-function isTruthyEnv(value) {
-  if (!value) return false;
-  const normalized = String(value).trim().toLowerCase();
-  if (!normalized) return false;
-  return !['0', 'false', 'no', 'off'].includes(normalized);
-}
-
 function escapeHtmlText(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -239,16 +224,11 @@ function escapeHtmlText(value) {
     .replace(/"/g, '&quot;');
 }
 
+// Text only. Upstream loads a remote logo here, carrying the plugin version,
+// as usage telemetry; this fork makes no outbound requests.
 function brandMarkup() {
   const version = escapeHtmlText(SUPERPOWERS_VERSION);
-  const text = SUPERPOWERS_TELEMETRY_DISABLED
-    ? 'Prime Radiant Superpowers v' + version
-    : 'Superpowers v' + version;
-  const logo = SUPERPOWERS_TELEMETRY_DISABLED
-    ? ''
-    : '<img class="brand-logo" src="' + SUPERPOWERS_BRAND_IMAGE_URL + '?v=' + encodeURIComponent(SUPERPOWERS_VERSION) + '" alt="Prime Radiant" referrerpolicy="no-referrer" decoding="async">';
-
-  return '<div class="brand"><a href="https://github.com/obra/superpowers">' + logo + '<span class="brand-copy">' + text + '</span></a></div>';
+  return '<div class="brand"><span class="brand-copy">Superpowers v' + version + '</span></div>';
 }
 
 function renderBranding(html) {
@@ -363,12 +343,32 @@ function queryKey(url) {
   return new URLSearchParams(url.slice(q + 1)).get('key');
 }
 
+// Everything a screen may load comes from this server. The agent writes the
+// screens, so a remote <img>, font, stylesheet or script would otherwise be
+// fetched by the browser; the policy makes the browser refuse it instead.
+// connect-src names the WebSocket origin explicitly because older browsers do
+// not let 'self' cover ws:.
+function contentSecurityPolicy() {
+  const ws = 'ws://localhost:' + PORT + ' ws://127.0.0.1:' + PORT;
+  return [
+    "default-src 'self'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline'",
+    "connect-src 'self' " + ws,
+    "form-action 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'"
+  ].join('; ');
+}
+
 function securityHeaders(headers = {}) {
   return {
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
     'X-Frame-Options': 'DENY',
-    'Content-Security-Policy': "frame-ancestors 'none'",
+    'Content-Security-Policy': contentSecurityPolicy(),
     'Cross-Origin-Resource-Policy': 'same-origin',
     ...headers
   };
@@ -524,24 +524,23 @@ function broadcast(msg) {
 }
 
 // Best-effort: open the user's browser the first time a screen is actually ready
-// to show. Skips when disabled, on a non-loopback (remote) bind, or when a
-// browser is already connected. Override the launcher with BRAINSTORM_OPEN_CMD.
+// to show. Skips when disabled or when a browser is already connected.
+// BRAINSTORM_OPEN_LOG (tests) records the URL to a file instead of launching;
+// upstream's open-command override, which ran an arbitrary command through a
+// shell, is gone.
 let browserOpened = false;
 function maybeOpenBrowser() {
   if (browserOpened) return;
   browserOpened = true;
   if (!process.env.BRAINSTORM_OPEN) return; // opt-in: only after the user approves the companion
-  if (HOST !== '127.0.0.1' && HOST !== 'localhost') return;
   if (clients.size > 0) return; // the user already opened it
   const url = companionUrl(); // must carry the key or the gate 403s it
-  const cp = require('child_process');
-  // Operator-provided launcher: run as given (this env var is trusted operator input).
-  if (process.env.BRAINSTORM_OPEN_CMD) {
-    try { cp.exec(process.env.BRAINSTORM_OPEN_CMD + ' ' + JSON.stringify(url), () => {}); } catch (e) { /* best effort */ }
+  if (process.env.BRAINSTORM_OPEN_LOG) {
+    try { fs.appendFileSync(process.env.BRAINSTORM_OPEN_LOG, url + '\n'); } catch (e) { /* best effort */ }
     return;
   }
-  // Platform launchers: pass the URL as an argv element via execFile (no shell),
-  // so a url-host containing shell metacharacters can't inject a command.
+  const cp = require('child_process');
+  // Platform launchers: pass the URL as an argv element via execFile (no shell).
   const launcher = browserLauncherForPlatform(url);
   if (!launcher) return; // headless: nothing to open
   try { cp.execFile(launcher.bin, launcher.args, () => {}); } catch (e) { /* best effort */ }

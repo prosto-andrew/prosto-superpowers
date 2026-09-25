@@ -1,11 +1,10 @@
 /**
  * Security tests for the brainstorm server's per-session key.
  *
- * The companion server is reachable by any local browser tab (default loopback
- * bind) and by any host that can route to it (remote `--host 0.0.0.0` bind).
- * A per-session secret key gates every endpoint so that neither a browser
- * confused-deputy nor a direct remote client can read screens/files or inject
- * events into state/events (prompt injection into a live agent session).
+ * The companion server binds loopback only, but is still reachable by any
+ * local browser tab. A per-session secret key gates every endpoint so that a
+ * browser confused-deputy cannot read screens/files or inject events into
+ * state/events (prompt injection into a live agent session).
  *
  * Auth = a valid `?key=<token>` query param OR a valid session cookie.
  *
@@ -29,7 +28,17 @@ const EXPECTED_SECURITY_HEADERS = {
   'referrer-policy': 'no-referrer',
   'cache-control': 'no-store',
   'x-frame-options': 'DENY',
-  'content-security-policy': "frame-ancestors 'none'",
+  'content-security-policy': [
+    "default-src 'self'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline'",
+    `connect-src 'self' ws://localhost:${TEST_PORT} ws://127.0.0.1:${TEST_PORT}`,
+    "form-action 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'none'"
+  ].join('; '),
   'cross-origin-resource-policy': 'same-origin'
 };
 
