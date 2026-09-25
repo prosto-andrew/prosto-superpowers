@@ -1,37 +1,45 @@
-# Testing Superpowers
+# Testing superpowers-custom
 
-Superpowers has two distinct kinds of tests, each in its own directory:
+All plugin tests live in `tests/`. Upstream's skill-behavior eval lab
+(`evals/`, a separate repository) is not part of this fork.
 
-- **`tests/`** — does the plugin's non-LLM code work? Bash + node + python integration tests for brainstorm-server JS, OpenCode plugin loading, codex-plugin sync, and analysis utilities.
-- **`evals/`** — do agents behave correctly on real LLM sessions? Python harness driving real tmux sessions of Claude Code / Codex / Gemini CLI, with an LLM actor and verifier judging skill compliance.
+## Offline, bash and git only
 
-## Plugin tests
+These run on a plain Windows Git Bash install and need nothing else:
 
-Live in `tests/`. Currently:
+- `tests/no-egress/test-no-egress.sh` — the fork's main guard: no URL to a
+  non-loopback host in code, no raw network API, no auto-loaded remote
+  resource in skills, every network command in a skill gated and allowlisted,
+  and none of the removed telemetry, remote-bind, upstream-reporting or
+  permission-bypass code back in the tree. Run it after every upstream merge.
+- `tests/diagnosing-sessions/test-skill-structure.sh` — structure of the
+  local-only diagnosing skill (frontmatter, referenced files, word budget) plus
+  its no-outbound checks.
+- `tests/claude-code/test-worktree-path-policy.sh`,
+  `tests/claude-code/test-sdd-workspace.sh`,
+  `tests/claude-code/test-executing-plans-scripts.sh` — the SDD and
+  plan-execution helper scripts. They also prove the LF rule in
+  `.gitattributes` works, since a CRLF checkout makes those scripts fail.
+- `tests/systematic-debugging/test-find-polluter.sh`.
 
-- `tests/brainstorm-server/` — node test suite for the brainstorm server JS code.
-- `tests/opencode/` — bash tests for OpenCode plugin loading, bootstrap caching, and tool registration.
-- `tests/codex-plugin-sync/` — bash sync verification.
-- `tests/kimi/` — bash/Python checks for Kimi plugin manifest wiring.
-- `tests/claude-code/test-helpers.sh`, `analyze-token-usage.py` — utilities used by remaining bash tests.
-- `tests/claude-code/test-subagent-driven-development.sh` — agent-can-describe-SDD test (no quorum counterpart; tests description-recall, not behavior).
-- `tests/claude-code/test-subagent-driven-development-integration.sh` — extended SDD integration with token analysis (quorum covers the YAGNI subset; bash adds commit-count, Claude Code task-tracking, and token telemetry assertions).
-- `tests/claude-code/test-worktree-native-preference.sh` — RED-GREEN-REFACTOR validation for worktree skill (quorum covers the PRESSURE phase; bash also covers RED/GREEN baselines).
-- `tests/explicit-skill-requests/` — Haiku-specific, multi-turn, and skill-name-prompted tests not covered by quorum.
-- `tests/diagnosing-superpowers/test-skill-structure.sh` — structural checks for the diagnosing-superpowers skill (frontmatter, referenced files, leak scan, word budget); behavior-scenario eval records are kept by the maintainer outside the repo.
+## Needs Node.js
 
-Run plugin tests via the relevant directory's `run-*.sh` or `npm test`.
+- `tests/hooks/test-session-start.sh` — SessionStart hook output shapes.
+- `tests/writing-skills/test-render-graphs.sh`.
+- `tests/brainstorm-server/` — the visual companion server. `npm test` there
+  needs one `npm install`, which downloads the `ws` test client from
+  registry.npmjs.org; that is a deliberate, manual network step.
+  `windows-lifecycle.test.sh` runs separately (Git Bash only, over 60 s).
 
-## Skill behavior evals
+## Other tools
 
-Live in `evals/` (the [superpowers-evals](https://github.com/prime-radiant-inc/superpowers-evals/) eval lab, since renamed from Drill). Quorum is the harness CLI — one part of the system: it drives real coding-agent CLIs through a Gauntlet QA agent and grades them against each scenario's acceptance criteria plus deterministic post-checks. Scenarios live at `evals/scenarios/<name>/`. See `evals/README.md` for setup, the container runtime, and the safety model. Quick start (local break-glass run):
+- `tests/version-bump/test-bump-version.sh` — needs `jq` and `yq`.
+- `tests/shell-lint/test-lint-shell.sh` — needs `shellcheck`.
+- `tests/hermes/` — Python tests for the Hermes plugin.
+- `tests/codex/test-marketplace-manifest.sh` — Codex marketplace manifest.
 
-```bash
-cd evals
-bun install
-export SUPERPOWERS_ROOT=/path/to/superpowers
-bun run quorum run scenarios/triggering-test-driven-development --coding-agent claude
-bun run quorum show <run-dir>
-```
+## Calls the model
 
-Quorum scenarios are slow (3-30+ minutes each) and run real LLM sessions in permissive modes — read `evals/README.md`'s Live Eval Risk section first. Only the static gates (`bun run check`, `bun run quorum check`) are safe for public CI; the natural follow-up remains a tiered model (static gates on PR, live sweep nightly + on-demand).
+- `tests/claude-code/test-subagent-driven-development.sh` runs `claude -p`
+  against the installed plugin (not the working tree) and costs tokens. It uses
+  normal permission checks. Upstream's tests that bypassed them were removed.

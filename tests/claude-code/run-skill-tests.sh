@@ -54,14 +54,14 @@ while [[ $# -gt 0 ]]; do
             echo "  --verbose, -v        Show verbose output"
             echo "  --test, -t NAME      Run only the specified test"
             echo "  --timeout SECONDS    Set timeout per test (default: 900)"
-            echo "  --integration, -i    Run integration tests (slow, 10-30 min)"
+            echo "  --integration, -i    Run integration tests (none in this fork)"
             echo "  --help, -h           Show this help"
             echo ""
             echo "Tests:"
             echo "  test-subagent-driven-development.sh  Test skill loading and requirements"
             echo ""
-            echo "Integration Tests (use --integration):"
-            echo "  test-subagent-driven-development-integration.sh  Full workflow execution"
+            echo "Integration tests: none in this fork (upstream's ran claude with"
+            echo "permission checks bypassed and was removed)."
             exit 0
             ;;
         *)
@@ -80,10 +80,9 @@ tests=(
     "test-subagent-driven-development.sh"
 )
 
-# Integration tests (slow, full execution)
-integration_tests=(
-    "test-subagent-driven-development-integration.sh"
-)
+# Integration tests (slow, full execution). Empty in this fork: upstream's
+# SDD integration test ran claude with permission checks bypassed.
+integration_tests=()
 
 # Add integration tests if requested
 if [ "$RUN_INTEGRATION" = true ]; then
