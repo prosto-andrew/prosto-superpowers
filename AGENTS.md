@@ -1,7 +1,7 @@
 # superpowers-custom — Guidelines for Agents Working in This Repository
 
 This repository is a private, local fork of [obra/superpowers](https://github.com/obra/superpowers)
-v6.4.1 (commit `5bf4e78`). It exists for one reason: **nothing in it sends data
+v6.4.2 (commit `8ca22db`). It exists for one reason: **nothing in it sends data
 off the machine on its own, and nothing it tells an agent to do sends data
 without an explicit yes from your human partner.** Every rule below serves that.
 
@@ -47,8 +47,12 @@ automatically. When asked to help with one:
    commands, new harness code, and changes to the files this fork edited.
 3. Merge, resolve, then run both tests above plus the shell tests in
    `docs/testing.md`. Re-read every new hit from the guard before touching it.
-4. Bump the version in every file listed in `.version-bump.json`
-   (`6.4.1-custom.N`), or Claude Code will not pick up the new copy.
+4. Bump the version in every file listed in `.version-bump.json` with
+   `bash scripts/bump-version.sh <upstream version>-custom.1`, or Claude Code
+   will not pick up the new copy.
+
+The same goes for any change of your own: bump to `-custom.N+1` before you
+finish, so the next session loads it.
 
 ## Skill content is behavior-shaping code
 
