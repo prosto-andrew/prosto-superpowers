@@ -21,6 +21,11 @@ fi
 
 # --- helpers ---
 
+# jq.exe on Windows ends every output line with CRLF. The stray CR breaks field
+# names passed on to yq and would turn rewritten JSON manifests into CRLF, so
+# strip it here for every jq call.
+jq() { command jq "$@" | tr -d '\r'; }
+
 # Read a dotted field path from a JSON file.
 # Handles both simple ("version") and nested ("plugins.0.version") paths.
 read_json_field() {
