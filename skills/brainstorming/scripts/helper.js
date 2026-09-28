@@ -146,12 +146,20 @@
   function isOffOrigin(href) {
     try { return new URL(href, window.location.href).origin !== window.location.origin; } catch (e) { return true; }
   }
+  // Read the attribute, not link.href: on an SVG <a> that property is an
+  // SVGAnimatedString, which stringifies to a relative, same-origin path.
+  // xlink:href is the SVG 1.1 spelling.
+  function linkHref(link) {
+    const href = link.getAttribute('href');
+    return href !== null ? href : link.getAttribute('xlink:href');
+  }
+  // preventDefault only: the [data-choice] listener must still see a click on
+  // a link inside an option card, or the choice never reaches the agent.
   function blockOffOriginLink(e) {
-    const link = e.target.closest && e.target.closest('a[href], area[href]');
-    if (link && isOffOrigin(link.href)) {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-    }
+    const link = e.target.closest && e.target.closest('a, area');
+    if (!link) return;
+    const href = linkHref(link);
+    if (href !== null && isOffOrigin(href)) e.preventDefault();
   }
   document.addEventListener('click', blockOffOriginLink, true);
   document.addEventListener('auxclick', blockOffOriginLink, true);

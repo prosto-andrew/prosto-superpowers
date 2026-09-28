@@ -85,12 +85,12 @@ console.log('\n--- Reconnect state machine (mocked browser) ---');
 // Drive helper.js's browser code against mocked DOM/WebSocket/timers/clock so we
 // can exercise the actual reconnect/status/tombstone behaviour, not just grep it.
 function makeEnv() {
-  const state = { now: 1000, timers: [], reloads: 0, replacements: [], appended: [], sessionKey: 'stored-key-abc' };
+  const state = { now: 1000, timers: [], reloads: 0, replacements: [], appended: [], sessionKey: 'stored-key-abc', listeners: [], sent: [] };
   const sockets = [];
   const statusEl = { textContent: '', style: { setProperty() {} } };
   class FakeWS {
     constructor(url) { this.url = url; this.readyState = 0; this.onopen = this.onclose = this.onmessage = this.onerror = null; sockets.push(this); }
-    send() {}
+    send(data) { state.sent.push(JSON.parse(data)); }
     close() { this.readyState = 3; if (this.onclose) this.onclose(); }
     open() { this.readyState = 1; if (this.onopen) this.onopen(); }
   }
@@ -100,6 +100,8 @@ function makeEnv() {
     window: {
       location: {
         host: 'localhost:7777',
+        href: 'http://localhost:7777/',
+        origin: 'http://localhost:7777',
         reload() { state.reloads++; },
         replace(url) { state.replacements.push(url); }
       },
@@ -109,7 +111,7 @@ function makeEnv() {
       querySelector: (s) => s === '.status' ? statusEl : null,
       getElementById: () => null,
       createElement: () => ({ style: {}, id: '' }),
-      addEventListener() {},
+      addEventListener: (type, fn, capture) => state.listeners.push({ type, fn, capture: !!capture }),
       body: { appendChild: (el) => state.appended.push(el) }
     },
     WebSocket: FakeWS,
@@ -123,6 +125,21 @@ function makeEnv() {
     boot() { new Function(...Object.keys(env), src)(...Object.values(env)); },
     advance(ms) { state.now += ms; },
     last() { return sockets[sockets.length - 1]; },
+    // Capture listeners first, then bubble, as the browser would for a click.
+    dispatch(type, target) {
+      const ev = {
+        type, target, defaultPrevented: false, stopped: false,
+        preventDefault() { this.defaultPrevented = true; },
+        stopImmediatePropagation() { this.stopped = true; }
+      };
+      for (const capture of [true, false]) {
+        for (const l of state.listeners) {
+          if (l.type !== type || l.capture !== capture || ev.stopped) continue;
+          l.fn(ev);
+        }
+      }
+      return ev;
+    },
     fireReconnect() {
       const t = [...state.timers].reverse().find(x => !x.fired && !x.cleared);
       if (!t) throw new Error('no reconnect scheduled');
@@ -191,6 +208,77 @@ test('reloads to recover when tombstoned and no sessionStorage key is present', 
   e.fireReconnect(); e.last().open();                    // server back (e.g. cookie-only page)
   assert.strictEqual(e.state.reloads, 1, 'reloads once on recovery');
   assert.deepStrictEqual(e.state.replacements, []);
+});
+
+// A stand-in for a DOM element: closest() answers the two selectors helper.js
+// asks for, walking up through `parent`.
+// Never requested: the fake DOM only compares origins.
+const OFF_ORIGIN = 'https://evil.example';
+
+function el({ tag = 'div', attrs = {}, choice, parent = null, text = '' }) {
+  const node = {
+    tag, parent, textContent: text, id: '',
+    dataset: choice !== undefined ? { choice } : {},
+    getAttribute: (name) => (name in attrs ? attrs[name] : null),
+    closest(sel) {
+      for (let n = node; n; n = n.parent) {
+        const isLink = n.tag === 'a' || n.tag === 'area';
+        if (sel === 'a, area' && isLink) return n;
+        if (sel === 'a[href], area[href]' && isLink && n.getAttribute('href') !== null) return n;
+        if (sel === '[data-choice]' && n.dataset.choice !== undefined) return n;
+      }
+      return null;
+    }
+  };
+  // An HTML link's href property is the resolved URL string.
+  if (attrs.href !== undefined) node.href = new URL(attrs.href, 'http://localhost:7777/').href;
+  return node;
+}
+
+console.log('\n--- Off-origin navigation ---');
+
+test('blocks a click on an off-origin link', () => {
+  const e = makeEnv(); e.boot();
+  const link = el({ tag: 'a', attrs: { href: OFF_ORIGIN + '/?q=1' } });
+  assert.strictEqual(e.dispatch('click', link).defaultPrevented, true);
+  assert.strictEqual(e.dispatch('auxclick', link).defaultPrevented, true);
+});
+
+test('blocks an SVG link, whose href property is not a string', () => {
+  const e = makeEnv(); e.boot();
+  const link = el({ tag: 'a', attrs: { href: OFF_ORIGIN + '/' } });
+  link.href = { baseVal: OFF_ORIGIN + '/', animVal: OFF_ORIGIN + '/' };
+  assert.strictEqual(e.dispatch('click', link).defaultPrevented, true);
+});
+
+test('blocks an SVG 1.1 xlink:href link', () => {
+  const e = makeEnv(); e.boot();
+  const link = el({ tag: 'a', attrs: { 'xlink:href': OFF_ORIGIN + '/' } });
+  assert.strictEqual(e.dispatch('click', link).defaultPrevented, true);
+});
+
+test('blocks a link with userinfo that only looks local', () => {
+  const e = makeEnv(); e.boot();
+  const link = el({ tag: 'a', attrs: { href: 'http://localhost:7777@evil.example/' } });
+  assert.strictEqual(e.dispatch('click', link).defaultPrevented, true);
+});
+
+test('lets same-origin links and plain elements through', () => {
+  const e = makeEnv(); e.boot();
+  assert.strictEqual(e.dispatch('click', el({ tag: 'a', attrs: { href: '/files/mock.png' } })).defaultPrevented, false);
+  assert.strictEqual(e.dispatch('click', el({ tag: 'a', attrs: { href: '#section' } })).defaultPrevented, false);
+  assert.strictEqual(e.dispatch('click', el({ tag: 'a' })).defaultPrevented, false);
+  assert.strictEqual(e.dispatch('click', el({})).defaultPrevented, false);
+});
+
+test('a blocked link inside an option card still records the choice', () => {
+  const e = makeEnv(); e.boot();
+  e.last().open();
+  const card = el({ choice: 'a', text: 'Option A' });
+  const link = el({ tag: 'a', attrs: { href: OFF_ORIGIN + '/' }, parent: card });
+  assert.strictEqual(e.dispatch('click', link).defaultPrevented, true);
+  assert.strictEqual(e.state.sent.length, 1);
+  assert.strictEqual(e.state.sent[0].choice, 'a');
 });
 
 console.log(`\n--- Results: ${passed} passed, ${failed} failed ---`);

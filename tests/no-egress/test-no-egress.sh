@@ -9,8 +9,10 @@
 #
 # Three scans:
 #   1. Code (scripts, hooks, JS/TS/Python, HTML, tests): any URL to a host that
-#      is not loopback, any URL whose host is built at runtime, any raw network
-#      API or network command, and any request call not aimed at loopback.
+#      is not loopback, any URL whose host is built at runtime, any
+#      protocol-relative URL, any raw network API or network command, and any
+#      request call not aimed at loopback. Manifests (JSON/YAML/TOML) get the
+#      URL scan too, since a harness reads them (an MCP server "url", say).
 #      Pattern scans cannot prove absence; they catch the plain ways out. Read
 #      every hit the guard reports, and read new code from upstream anyway.
 #   2. Skill markdown: auto-loaded remote resources, and network commands.
@@ -45,6 +47,8 @@ allow hooks/session-start 'See: https://github.com/obra/superpowers/issues/571' 
   'comment citing the upstream bug behind the printf workaround; never fetched'
 allow tests/claude-code/run-skill-tests.sh 'Install Claude Code first: https://code.claude.com' \
   'text printed when claude is missing; never fetched'
+allow .codex-plugin/plugin.json '"url": "https://github.com/obra"' \
+  "the author's profile link in the author block; display metadata, never fetched"
 allow skills/finishing-a-development-branch/SKILL.md "$GATE" 'the gate rule itself names the commands it gates'
 allow skills/finishing-a-development-branch/SKILL.md 'git pull   # network: ask first' "$GATED"
 allow skills/finishing-a-development-branch/SKILL.md 'git push -u origin <feature-branch>' "$GATED"
@@ -73,6 +77,10 @@ allow tests/brainstorm-server/auth.test.js 'http.get(url, { headers }' "$LOCAL: 
 allow tests/brainstorm-server/auth.test.js 'const ws = new WebSocket(url, opts);' "$LOCAL: url is ws://localhost:TEST_PORT"
 allow tests/brainstorm-server/server.test.js 'async function fetch(url) {' 'a local helper named fetch; its callers pass localhost URLs'
 allow tests/brainstorm-server/server.test.js 'http.get(url, { headers }' "$LOCAL: the fetch helper above, called with localhost URLs"
+allow tests/brainstorm-server/helper.test.js "const OFF_ORIGIN = 'https://evil.example';" \
+  'test data for the link-blocking tests; handed to a fake DOM that only compares origins, never requested'
+allow tests/brainstorm-server/helper.test.js "{ href: 'http://localhost:7777@evil.example/' }" \
+  'test data: a userinfo URL the link blocker must refuse; handed to a fake DOM, never requested'
 allow tests/brainstorm-server/lifecycle.test.js "require('http').get(lines[0]" \
   "$LOCAL: lines[0] is the URL the companion printed, always http://localhost"
 
@@ -118,40 +126,72 @@ report() {
 
 echo "no-egress guard"
 
-# Tracked files in a git checkout. Anywhere else (an installed copy of the
-# plugin has no .git) every file under the root, so the guard scans what a
-# harness actually loads instead of passing on an empty list.
+# In a git checkout: tracked files plus new ones not yet added (minus ignored
+# ones), so a change is checked before `git add`; files deleted from the work
+# tree are dropped. Anywhere else (an installed copy of the plugin has no .git)
+# every file under the root, so the guard scans what a harness actually loads
+# instead of passing on an empty list.
 if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ -z "$(git rev-parse --show-prefix 2>/dev/null)" ]; then
-  list_files() { git ls-files; }
+  list_files() {
+    git ls-files --cached --others --exclude-standard | sort -u |
+      while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done
+  }
 else
   list_files() { find . -type f -not -path './.git/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort; }
 fi
 
-mapfile -t CODE_FILES < <(list_files | grep -E '\.(cjs|js|mjs|ts|py|sh|ps1|html|cmd)$|^hooks/|^skills/[^/]+/scripts/' | grep -v 'package-lock\.json$')
-mapfile -t SKILL_MD < <(list_files | grep -E '^skills/.*\.md$')
+# read_lines NAME — fill array NAME from stdin, one element per line. mapfile
+# needs bash 4; macOS still ships bash 3.2.
+read_lines() {
+  local _line
+  eval "$1=()"
+  while IFS= read -r _line; do eval "$1+=(\"\$_line\")"; done
+}
+
+read_lines CODE_FILES < <(list_files | grep -E '\.(cjs|js|mjs|ts|py|sh|ps1|html|cmd)$|^hooks/|^skills/[^/]+/scripts/' | grep -v 'package-lock\.json$')
+read_lines MANIFESTS < <(list_files | grep -E '\.(json|ya?ml|toml)$' | grep -v 'package-lock\.json$')
+read_lines SKILL_MD < <(list_files | grep -E '^skills/.*\.md$')
 # History and licence texts are exempt: they describe upstream, not this fork.
-mapfile -t TREE < <(list_files | grep -vE '^(RELEASE-NOTES\.md|CODE_OF_CONDUCT\.md|LICENSE|docs/superpowers/|docs/plans/)' | grep -v 'package-lock\.json$')
+read_lines TREE < <(list_files | grep -vE '^(RELEASE-NOTES\.md|CODE_OF_CONDUCT\.md|LICENSE|docs/superpowers/|docs/plans/)' | grep -v 'package-lock\.json$')
 
 # A scan over no files passes without looking at anything. Refuse instead.
-if [ "${#CODE_FILES[@]}" -eq 0 ] || [ "${#SKILL_MD[@]}" -eq 0 ] || [ "${#TREE[@]}" -eq 0 ]; then
-  fail "found files to scan (code: ${#CODE_FILES[@]}, skill markdown: ${#SKILL_MD[@]}, tree: ${#TREE[@]}) under $REPO_ROOT"
+if [ "${#CODE_FILES[@]}" -eq 0 ] || [ "${#MANIFESTS[@]}" -eq 0 ] || [ "${#SKILL_MD[@]}" -eq 0 ] || [ "${#TREE[@]}" -eq 0 ]; then
+  fail "found files to scan (code: ${#CODE_FILES[@]}, manifests: ${#MANIFESTS[@]}, skill markdown: ${#SKILL_MD[@]}, tree: ${#TREE[@]}) under $REPO_ROOT"
   echo
   echo "Passed: $PASSES  Failed: $FAILURES"
   exit 1
 fi
 
 # --- 1. code --------------------------------------------------------------
-# URLs whose host is not loopback.
+# URLs whose host is not loopback. The match takes the whole authority,
+# userinfo included, and the host is what follows the last @: in
+# http://localhost@evil.com the request goes to evil.com.
 LOCAL_HOST='^(localhost|127\.0\.0\.1|\[::1\])$'
-url_hits=""
-while IFS= read -r hit; do
-  [ -z "$hit" ] && continue
-  path="${hit%%:*}"; rest="${hit#*:}"; lineno="${rest%%:*}"; url="${rest#*:}"
-  host="${url#*://}"; host="${host%%[:/]*}"
-  [[ "$host" =~ $LOCAL_HOST ]] && continue
-  url_hits+="$path:$lineno:$(sed -n "${lineno}p" "$path")"$'\n'
-done < <(grep -noE '(https?|wss?)://[][A-Za-z0-9.:-]*[A-Za-z0-9]' "${CODE_FILES[@]}" 2>/dev/null)
-report "code: no URL to a non-loopback host" "$url_hits"
+URL_RE='(https?|wss?)://[][A-Za-z0-9._~%!&+,;=:@-]*[]A-Za-z0-9]'
+# Manifest fields that only describe the project; no harness fetches them.
+META_KEY='"(homepage|repository|websiteURL|privacyPolicyURL|termsOfServiceURL)"[[:space:]]*:'
+# non_loopback_urls FILE... — "path:line:source line" for each URL whose host
+# is not loopback.
+non_loopback_urls() {
+  local hit path rest lineno url authority host
+  while IFS= read -r hit; do
+    [ -z "$hit" ] && continue
+    path="${hit%%:*}"; rest="${hit#*:}"; lineno="${rest%%:*}"; url="${rest#*:}"
+    authority="${url#*://}"; host="${authority##*@}"
+    if [[ "$host" == \[* ]]; then host="${host%%]*}]"; else host="${host%%:*}"; fi
+    [[ "$host" =~ $LOCAL_HOST ]] && continue
+    printf '%s:%s:%s\n' "$path" "$lineno" "$(sed -n "${lineno}p" "$path")"
+  done < <(grep -noE "$URL_RE" "$@" 2>/dev/null)
+}
+report "code: no URL to a non-loopback host" "$(non_loopback_urls "${CODE_FILES[@]}")"
+report "manifests: no URL to a non-loopback host outside project metadata" \
+  "$(non_loopback_urls "${MANIFESTS[@]}" | grep -vE "^[^:]*:[0-9]+:[[:space:]]*$META_KEY")"
+
+# Protocol-relative URLs (//host/...) take the page's scheme, so they reach
+# any host without naming one. Only in an attribute, a CSS url(), or at the
+# start of a string literal; a // comment has a space or sits outside quotes.
+report "code: no protocol-relative URL" \
+  "$(grep -nE "(src|href|action|poster|srcset|data)[[:space:]]*=[[:space:]]*[\"']?//[^/[:space:]]|url\([[:space:]]*[\"']?//[^/[:space:]]|[\"'\`]//[A-Za-z0-9-]+\.[A-Za-z0-9.-]+" "${CODE_FILES[@]}" 2>/dev/null)"
 
 # URLs built at runtime: a scheme literal followed by a quote or `${`, so the
 # host comes from a variable or a concatenation and the scan above cannot see
@@ -160,15 +200,17 @@ report "code: no URL with a runtime-built host" \
   "$(grep -nE "(https?|wss?)://['\"\`]|(https?|wss?)://\\$\\{" "${CODE_FILES[@]}" 2>/dev/null)"
 
 # Modules and commands that only exist to reach another host.
-NET_API="require\\(['\"](node:)?(https|http2|net|dgram|tls)['\"]\\)|from ['\"](node:)?(https?|http2|net|dgram|tls)['\"]|XMLHttpRequest|sendBeacon|navigator\\.|urllib|http\\.client|requests\\.(get|post|put|patch|delete|head|request|Session)\\(|httpx|aiohttp|socket\\.(socket|create_connection)|asyncio\\.open_connection"
+# dns is here too: a lookup of <data>.attacker.example carries <data> out.
+NET_API="require\\(['\"](node:)?(https|http2|net|dgram|tls|dns)(/promises)?['\"]\\)|from ['\"](node:)?(https?|http2|net|dgram|tls|dns)(/promises)?['\"]|XMLHttpRequest|sendBeacon|navigator\\.|urllib|http\\.client|requests\\.(get|post|put|patch|delete|head|request|Session)\\(|httpx|aiohttp|socket\\.(socket|create_connection|gethostbyname|getaddrinfo)|asyncio\\.open_connection|dnspython|import dns"
 NET_CMD='curl |wget |gh (issue|api|pr|repo|search|gist)|git (push|fetch|pull|clone)|npm (install|ci|i)([^a-z]|$)|npx |pip install|/dev/(tcp|udp)/|\bnc |\bncat |Invoke-(WebRequest|RestMethod)|Net\.WebClient|Start-BitsTransfer'
 report "code: no raw network API or network command" \
   "$(grep -nE "$NET_API|$NET_CMD" "${CODE_FILES[@]}" 2>/dev/null)"
 
 # Request calls. A call is fine when its line names a loopback host; any other
-# call must be allowlisted with the reason its target is local.
+# call must be allowlisted with the reason its target is local. The host must
+# end there: localhost@evil.com and localhost.evil.com are not loopback.
 NET_CALL="(^|[^A-Za-z0-9_.])fetch\\(|new WebSocket\\(|EventSource\\(|\\bhttps?\\.(get|request)\\(|require\\(['\"](node:)?https?['\"]\\)\\.(get|request)\\("
-LOOPBACK_ON_LINE="[\"'\`/](localhost|127\\.0\\.0\\.1|\\[::1\\])"
+LOOPBACK_ON_LINE="[\"'\`/](localhost|127\\.0\\.0\\.1|\\[::1\\])([^@A-Za-z0-9._~%-]|$)"
 report "code: every request call targets loopback" \
   "$(grep -nE "$NET_CALL" "${CODE_FILES[@]}" 2>/dev/null | grep -vE "$LOOPBACK_ON_LINE")"
 

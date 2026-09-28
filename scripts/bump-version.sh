@@ -46,7 +46,9 @@ write_json_field() {
 }
 
 require_tool() {
-  command -v "$1" >/dev/null 2>&1 || {
+  # type -P looks only at PATH; command -v would also accept the jq() wrapper
+  # above and pass on a machine without jq.
+  type -P "$1" >/dev/null 2>&1 || {
     echo "error: required tool '$1' is not on PATH" >&2
     return 1
   }
