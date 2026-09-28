@@ -124,6 +124,10 @@ cmd_check() {
   local has_drift=0
   local versions=()
 
+  # Without jq every read comes back empty and the drift report dies on an
+  # unbound array; say what is missing instead.
+  require_tool jq || return 1
+
   echo "Version check:"
   echo ""
 
@@ -159,6 +163,8 @@ cmd_check() {
 }
 
 cmd_audit() {
+  require_tool jq || return 1
+
   # First run check
   cmd_check || true
   echo ""

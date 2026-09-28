@@ -163,11 +163,13 @@ if [ "${#CODE_FILES[@]}" -eq 0 ] || [ "${#MANIFESTS[@]}" -eq 0 ] || [ "${#SKILL_
 fi
 
 # --- 1. code --------------------------------------------------------------
-# URLs whose host is not loopback. The match takes the whole authority,
-# userinfo included, and the host is what follows the last @: in
-# http://localhost@evil.com the request goes to evil.com.
+# URLs whose host is not loopback. The host is what follows the last @: in
+# http://localhost@evil.com the request goes to evil.com. The character class
+# leaves out , ; & + = ! on purpose: with them, 'http://localhost:3000,https://evil.com'
+# matched as one loopback URL and swallowed the scheme of the second. Userinfo
+# that needs those characters is caught by the userinfo check below instead.
 LOCAL_HOST='^(localhost|127\.0\.0\.1|\[::1\])$'
-URL_RE='(https?|wss?)://[][A-Za-z0-9._~%!&+,;=:@-]*[]A-Za-z0-9]'
+URL_RE='(https?|wss?)://[][A-Za-z0-9._~%:@-]*[]A-Za-z0-9]'
 # Manifest fields that only describe the project; no harness fetches them.
 META_KEY='"(homepage|repository|websiteURL|privacyPolicyURL|termsOfServiceURL)"[[:space:]]*:'
 # non_loopback_urls FILE... — "path:line:source line" for each URL whose host
@@ -186,6 +188,12 @@ non_loopback_urls() {
 report "code: no URL to a non-loopback host" "$(non_loopback_urls "${CODE_FILES[@]}")"
 report "manifests: no URL to a non-loopback host outside project metadata" \
   "$(non_loopback_urls "${MANIFESTS[@]}" | grep -vE "^[^:]*:[0-9]+:[[:space:]]*$META_KEY")"
+
+# URLs with userinfo (user@host). A loopback name before the @ hides the real
+# host, and http://localhost;x@evil.com stops the URL scan above at the ;.
+# Nothing in this plugin needs credentials in a URL, so every one is a hit.
+report "code and manifests: no URL with userinfo" \
+  "$(grep -nE "(https?|wss?)://[^/?#[:space:]\"'\`]*@" "${CODE_FILES[@]}" "${MANIFESTS[@]}" 2>/dev/null)"
 
 # Protocol-relative URLs (//host/...) take the page's scheme, so they reach
 # any host without naming one. Only in an attribute, a CSS url(), or at the
