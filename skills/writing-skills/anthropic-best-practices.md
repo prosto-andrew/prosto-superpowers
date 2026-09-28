@@ -918,7 +918,7 @@ Even if your agent could write a script, pre-made scripts offer advantages:
 
 *(Figure omitted in this fork, which loads no remote images: Bundling executable scripts alongside instruction files.)*
 
-The diagram above shows how executable scripts work alongside instruction files. The instruction file (forms.md) references the script, and the agent can execute it without loading its contents into context.
+Executable scripts work alongside instruction files: the instruction file (forms.md) references the script, and the agent can execute it without loading its contents into context.
 
 **Important distinction**: Make clear in your instructions whether the agent should:
 

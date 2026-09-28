@@ -28,6 +28,7 @@ const EXPECTED_SECURITY_HEADERS = {
   'referrer-policy': 'no-referrer',
   'cache-control': 'no-store',
   'x-frame-options': 'DENY',
+  'x-dns-prefetch-control': 'off',
   'content-security-policy': [
     "default-src 'self'",
     "img-src 'self' data: blob:",

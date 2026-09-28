@@ -185,7 +185,13 @@ assert_command_output \
     bash "$WRAPPER_UNDER_TEST" session-start
 
 sdk_home="$(make_home sdk-fallback)"
-assert_command_output     "Without CLAUDE_PLUGIN_ROOT emits top-level additionalContext only"     "sdk"     ""     ""     "$sdk_home"     bash "$HOOK_UNDER_TEST"
+assert_command_output \
+    "Without CLAUDE_PLUGIN_ROOT emits top-level additionalContext only" \
+    "sdk" \
+    "" \
+    "" \
+    "$sdk_home" \
+    bash "$HOOK_UNDER_TEST"
 
 legacy_home="$(make_home legacy-warning-removed)"
 mkdir -p "$legacy_home/.config/superpowers/skills"

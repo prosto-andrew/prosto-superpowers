@@ -86,7 +86,9 @@ integration_tests=()
 
 # Add integration tests if requested
 if [ "$RUN_INTEGRATION" = true ]; then
-    tests+=("${integration_tests[@]}")
+    # The +alt form keeps bash < 4.4 (macOS /bin/bash) from treating an empty
+    # array as unbound under set -u.
+    tests+=(${integration_tests[@]+"${integration_tests[@]}"})
 fi
 
 # Filter to specific test if requested

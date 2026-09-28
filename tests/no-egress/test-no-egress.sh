@@ -9,7 +9,10 @@
 #
 # Three scans:
 #   1. Code (scripts, hooks, JS/TS/Python, HTML, tests): any URL to a host that
-#      is not loopback, and any raw network API or network command.
+#      is not loopback, any URL whose host is built at runtime, any raw network
+#      API or network command, and any request call not aimed at loopback.
+#      Pattern scans cannot prove absence; they catch the plain ways out. Read
+#      every hit the guard reports, and read new code from upstream anyway.
 #   2. Skill markdown: auto-loaded remote resources, and network commands.
 #   3. Whole tree: names of the specific things this fork removed.
 set -u
@@ -57,6 +60,22 @@ allow skills/using-git-worktrees/SKILL.md 'then go mod download; fi' "$GATED"
 allow skills/writing-skills/anthropic-best-practices.md 'Install required package: `pip install pypdf`' \
   'example sentence inside a guide on writing skills; not an instruction to this agent'
 
+LOCAL='target is local'
+allow skills/brainstorming/scripts/helper.js "return 'ws://' + window.location.host" \
+  "$LOCAL: the page's own origin, which is the loopback companion"
+allow skills/brainstorming/scripts/helper.js 'ws = new WebSocket(websocketUrl());' \
+  "$LOCAL: websocketUrl() is the page's own origin"
+allow skills/brainstorming/scripts/server.cjs "return 'http://' + urlHostForHttp(URL_HOST)" \
+  "$LOCAL: URL_HOST is the constant 'localhost'; this builds the URL shown to the user"
+allow skills/brainstorming/scripts/server.cjs "return origin === 'http://' + host;" \
+  'a string comparison for the WebSocket origin check; no request'
+allow tests/brainstorm-server/auth.test.js 'http.get(url, { headers }' "$LOCAL: url is http://localhost:TEST_PORT"
+allow tests/brainstorm-server/auth.test.js 'const ws = new WebSocket(url, opts);' "$LOCAL: url is ws://localhost:TEST_PORT"
+allow tests/brainstorm-server/server.test.js 'async function fetch(url) {' 'a local helper named fetch; its callers pass localhost URLs'
+allow tests/brainstorm-server/server.test.js 'http.get(url, { headers }' "$LOCAL: the fetch helper above, called with localhost URLs"
+allow tests/brainstorm-server/lifecycle.test.js "require('http').get(lines[0]" \
+  "$LOCAL: lines[0] is the URL the companion printed, always http://localhost"
+
 ALLOW_USED=()
 for _ in "${ALLOW_PATH[@]}"; do ALLOW_USED+=(0); done
 
@@ -99,11 +118,30 @@ report() {
 
 echo "no-egress guard"
 
-# --- 1. code --------------------------------------------------------------
-mapfile -t CODE_FILES < <(git ls-files | grep -E '\.(cjs|js|mjs|ts|py|sh|html|cmd)$|^hooks/|^skills/[^/]+/scripts/' | grep -v 'package-lock\.json$')
+# Tracked files in a git checkout. Anywhere else (an installed copy of the
+# plugin has no .git) every file under the root, so the guard scans what a
+# harness actually loads instead of passing on an empty list.
+if [ "$(git rev-parse --is-inside-work-tree 2>/dev/null)" = true ] && [ -z "$(git rev-parse --show-prefix 2>/dev/null)" ]; then
+  list_files() { git ls-files; }
+else
+  list_files() { find . -type f -not -path './.git/*' -not -path '*/node_modules/*' | sed 's|^\./||' | sort; }
+fi
 
-# URLs whose host is not loopback. `'http://' + host` builds a local URL and
-# carries no literal host, so it does not match.
+mapfile -t CODE_FILES < <(list_files | grep -E '\.(cjs|js|mjs|ts|py|sh|ps1|html|cmd)$|^hooks/|^skills/[^/]+/scripts/' | grep -v 'package-lock\.json$')
+mapfile -t SKILL_MD < <(list_files | grep -E '^skills/.*\.md$')
+# History and licence texts are exempt: they describe upstream, not this fork.
+mapfile -t TREE < <(list_files | grep -vE '^(RELEASE-NOTES\.md|CODE_OF_CONDUCT\.md|LICENSE|docs/superpowers/|docs/plans/)' | grep -v 'package-lock\.json$')
+
+# A scan over no files passes without looking at anything. Refuse instead.
+if [ "${#CODE_FILES[@]}" -eq 0 ] || [ "${#SKILL_MD[@]}" -eq 0 ] || [ "${#TREE[@]}" -eq 0 ]; then
+  fail "found files to scan (code: ${#CODE_FILES[@]}, skill markdown: ${#SKILL_MD[@]}, tree: ${#TREE[@]}) under $REPO_ROOT"
+  echo
+  echo "Passed: $PASSES  Failed: $FAILURES"
+  exit 1
+fi
+
+# --- 1. code --------------------------------------------------------------
+# URLs whose host is not loopback.
 LOCAL_HOST='^(localhost|127\.0\.0\.1|\[::1\])$'
 url_hits=""
 while IFS= read -r hit; do
@@ -115,14 +153,26 @@ while IFS= read -r hit; do
 done < <(grep -noE '(https?|wss?)://[][A-Za-z0-9.:-]*[A-Za-z0-9]' "${CODE_FILES[@]}" 2>/dev/null)
 report "code: no URL to a non-loopback host" "$url_hits"
 
-NET_API="require\\(['\"](https|net|dgram|tls)['\"]\\)|XMLHttpRequest|sendBeacon|navigator\\.|urllib|http\\.client|requests\\.(get|post)|socket\\.socket"
-NET_CMD='curl |wget |gh (issue|api|pr|repo|search|gist)|git (push|fetch|pull|clone)|npm (install|ci|i)([^a-z]|$)|npx |pip install'
+# URLs built at runtime: a scheme literal followed by a quote or `${`, so the
+# host comes from a variable or a concatenation and the scan above cannot see
+# it. Each one must be allowlisted with the reason its host is local.
+report "code: no URL with a runtime-built host" \
+  "$(grep -nE "(https?|wss?)://['\"\`]|(https?|wss?)://\\$\\{" "${CODE_FILES[@]}" 2>/dev/null)"
+
+# Modules and commands that only exist to reach another host.
+NET_API="require\\(['\"](node:)?(https|http2|net|dgram|tls)['\"]\\)|from ['\"](node:)?(https?|http2|net|dgram|tls)['\"]|XMLHttpRequest|sendBeacon|navigator\\.|urllib|http\\.client|requests\\.(get|post|put|patch|delete|head|request|Session)\\(|httpx|aiohttp|socket\\.(socket|create_connection)|asyncio\\.open_connection"
+NET_CMD='curl |wget |gh (issue|api|pr|repo|search|gist)|git (push|fetch|pull|clone)|npm (install|ci|i)([^a-z]|$)|npx |pip install|/dev/(tcp|udp)/|\bnc |\bncat |Invoke-(WebRequest|RestMethod)|Net\.WebClient|Start-BitsTransfer'
 report "code: no raw network API or network command" \
   "$(grep -nE "$NET_API|$NET_CMD" "${CODE_FILES[@]}" 2>/dev/null)"
 
-# --- 2. skill markdown ----------------------------------------------------
-mapfile -t SKILL_MD < <(git ls-files 'skills/*.md' 'skills/**/*.md' | sort -u)
+# Request calls. A call is fine when its line names a loopback host; any other
+# call must be allowlisted with the reason its target is local.
+NET_CALL="(^|[^A-Za-z0-9_.])fetch\\(|new WebSocket\\(|EventSource\\(|\\bhttps?\\.(get|request)\\(|require\\(['\"](node:)?https?['\"]\\)\\.(get|request)\\("
+LOOPBACK_ON_LINE="[\"'\`/](localhost|127\\.0\\.0\\.1|\\[::1\\])"
+report "code: every request call targets loopback" \
+  "$(grep -nE "$NET_CALL" "${CODE_FILES[@]}" 2>/dev/null | grep -vE "$LOOPBACK_ON_LINE")"
 
+# --- 2. skill markdown ----------------------------------------------------
 AUTOLOAD='<img[^>]*src=.?https?:|<(script|link|iframe|video|audio|source)[^>]*(src|href)=.?https?:|@import|url\(.?https?:|!\[[^]]*\]\(https?:'
 report "skills: no auto-loaded remote resource" \
   "$(grep -nE -i "$AUTOLOAD" "${SKILL_MD[@]}" 2>/dev/null)"
@@ -143,8 +193,6 @@ done
 [ "$gate_ok" -eq 1 ] && pass "every file with a gated command carries the gate rule"
 
 # --- 3. removed things stay removed --------------------------------------
-# History and licence texts are exempt: they describe upstream, not this fork.
-mapfile -t TREE < <(git ls-files | grep -vE '^(RELEASE-NOTES\.md|CODE_OF_CONDUCT\.md|LICENSE|docs/superpowers/|docs/plans/)' | grep -v 'package-lock\.json$')
 REMOVED='primeradiant|mintcdn|unsplash|BRAINSTORM_OPEN_CMD|BRAINSTORM_(URL_)?HOST|SUPERPOWERS_BRAND_IMAGE_URL|TELEMETRY_DISABLE_ENV_VARS|0\.0\.0\.0|diagnosing-superpowers|openai-codex-plugins|dangerously-skip-permissions|bypassPermissions'
 report "tree: removed telemetry, remote binds, upstream reporting and permission bypasses stay out" \
   "$(grep -n -i -E "$REMOVED" "${TREE[@]}" 2>/dev/null)"

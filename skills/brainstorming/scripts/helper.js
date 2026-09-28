@@ -140,6 +140,27 @@
 
   });
 
+  // The Content-Security-Policy stops remote loads but not navigation, so a
+  // link or window.open to another host would still carry whatever its URL
+  // holds off this machine. Refuse both; same-origin links keep working.
+  function isOffOrigin(href) {
+    try { return new URL(href, window.location.href).origin !== window.location.origin; } catch (e) { return true; }
+  }
+  function blockOffOriginLink(e) {
+    const link = e.target.closest && e.target.closest('a[href], area[href]');
+    if (link && isOffOrigin(link.href)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  }
+  document.addEventListener('click', blockOffOriginLink, true);
+  document.addEventListener('auxclick', blockOffOriginLink, true);
+  const nativeOpen = window.open;
+  window.open = function(url, ...rest) {
+    if (url !== undefined && url !== '' && isOffOrigin(String(url))) return null;
+    return nativeOpen.call(window, url, ...rest);
+  };
+
   // Frame UI: selection tracking
   window.selectedChoice = null;
 

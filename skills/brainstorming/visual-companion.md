@@ -81,18 +81,9 @@ bash scripts/start-server.sh --project-dir /path/to/project --open
 bash scripts/start-server.sh --project-dir /path/to/project --open --foreground
 ```
 
-**Copilot CLI:**
-```bash
-# Start it with Copilot CLI's non-blocking/background shell mechanism so the
-# server survives across turns. Keep --foreground so the harness, not the
-# script, owns backgrounding. The launcher is a .sh, so invoke it via bash
-# (on Windows, call Git Bash's bash.exe from the PowerShell tool).
-bash scripts/start-server.sh --project-dir /path/to/project --open --foreground
-```
-
 **Other environments:** The server must keep running in the background across conversation turns. If your environment reaps detached processes, use `--foreground` and launch the command with your platform's background execution mechanism.
 
-The server only ever binds `127.0.0.1`. If the browser runs on a different machine (remote or containerized setups), ask your human partner to forward the port over SSH (`ssh -L <port>:127.0.0.1:<port> <host>`) rather than exposing the server.
+The server only ever binds `127.0.0.1`. If the browser runs on a different machine reachable over SSH, ask your human partner to forward the port (`ssh -L <port>:127.0.0.1:<port> <host>`) rather than exposing the server. Inside a container, the container's `127.0.0.1` is not reachable from the host's browser (published ports do not reach it), and this fork has no option to bind wider: tell your human partner the companion is unavailable in this setup and continue the brainstorm in text.
 
 ## The Loop
 
@@ -268,6 +259,7 @@ If `$STATE_DIR/events` doesn't exist, the user didn't interact with the browser 
 - **2-4 options max** per screen
 - **Use real content when it matters** — for a photography portfolio, ask your human partner for a few sample images and copy them into `screen_dir`, or draw them as inline SVG. Placeholder content obscures design issues.
 - **No external resources** — every image, font, stylesheet and script comes from `screen_dir` or is inline. The server's Content-Security-Policy blocks remote URLs, so a screen that links one renders broken instead of loading it.
+- **No way off the page** — no link, redirect, `window.open`, `<meta http-equiv="refresh">` or `<link rel="prefetch|preconnect|dns-prefetch">` pointing at another host. The policy cannot stop the page itself from navigating away, and a URL carries whatever is put into it. If a real site matters to the design, name it in text.
 - **Keep mockups simple** — focus on layout and structure, not pixel-perfect design
 
 ## File Naming

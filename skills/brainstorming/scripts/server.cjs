@@ -346,6 +346,9 @@ function queryKey(url) {
 // Everything a screen may load comes from this server. The agent writes the
 // screens, so a remote <img>, font, stylesheet or script would otherwise be
 // fetched by the browser; the policy makes the browser refuse it instead.
+// It does not cover navigation: helper.js refuses off-origin links and
+// window.open, X-DNS-Prefetch-Control stops prefetch lookups, and the skill
+// forbids redirects. A script the agent writes can still assign location.
 // connect-src names the WebSocket origin explicitly because older browsers do
 // not let 'self' cover ws:.
 function contentSecurityPolicy() {
@@ -368,6 +371,7 @@ function securityHeaders(headers = {}) {
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
     'X-Frame-Options': 'DENY',
+    'X-DNS-Prefetch-Control': 'off',
     'Content-Security-Policy': contentSecurityPolicy(),
     'Cross-Origin-Resource-Policy': 'same-origin',
     ...headers
@@ -526,8 +530,9 @@ function broadcast(msg) {
 // Best-effort: open the user's browser the first time a screen is actually ready
 // to show. Skips when disabled or when a browser is already connected.
 // BRAINSTORM_OPEN_LOG (tests) records the URL to a file instead of launching;
-// upstream's open-command override, which ran an arbitrary command through a
-// shell, is gone.
+// the URL carries the session key, so the file must sit inside the session
+// directory. Upstream's open-command override, which ran an arbitrary command
+// through a shell, is gone.
 let browserOpened = false;
 function maybeOpenBrowser() {
   if (browserOpened) return;
@@ -536,7 +541,11 @@ function maybeOpenBrowser() {
   if (clients.size > 0) return; // the user already opened it
   const url = companionUrl(); // must carry the key or the gate 403s it
   if (process.env.BRAINSTORM_OPEN_LOG) {
-    try { fs.appendFileSync(process.env.BRAINSTORM_OPEN_LOG, url + '\n'); } catch (e) { /* best effort */ }
+    const log = path.resolve(process.env.BRAINSTORM_OPEN_LOG);
+    const rel = path.relative(path.resolve(SESSION_DIR), log);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) {
+      try { fs.appendFileSync(log, url + '\n'); } catch (e) { /* best effort */ }
+    }
     return;
   }
   const cp = require('child_process');
