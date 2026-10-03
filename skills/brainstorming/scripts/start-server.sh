@@ -113,6 +113,13 @@ SERVER_ID_FILE="${STATE_DIR}/server-instance-id"
 # Create fresh session directory with content and state peers
 mkdir -p "${SESSION_DIR}/content" "$STATE_DIR"
 
+# Session files hold the session key, the user's choices and absolute paths.
+# A self-ignoring .gitignore keeps them out of `git status` and commits
+# without touching any tracked file of the project.
+if [[ -n "$PROJECT_DIR" ]]; then
+  printf '*\n' > "${PROJECT_DIR}/.superpowers/brainstorm/.gitignore"
+fi
+
 SERVER_ID=""
 if [[ -r /dev/urandom ]]; then
   SERVER_ID="$(od -An -N24 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n' || true)"

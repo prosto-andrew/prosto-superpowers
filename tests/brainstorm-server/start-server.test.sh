@@ -109,6 +109,30 @@ else
 fi
 
 echo ""
+echo "--- start-server.sh session files stay out of git ---"
+
+# Session files hold the session key, the user's choices and absolute paths;
+# a project without a .superpowers/ ignore rule must not pick them up.
+git init -q "$TEST_DIR/gitproject"
+PATH="$TEST_DIR/fake-bin:$PATH" MSYSTEM="" \
+  bash "$START_SCRIPT" --project-dir "$TEST_DIR/gitproject" --foreground >/dev/null 2>&1 || true
+
+status=$(git -C "$TEST_DIR/gitproject" status --porcelain --untracked-files=all)
+if [[ -d "$TEST_DIR/gitproject/.superpowers/brainstorm" && "$status" != *".superpowers"* ]]; then
+  pass "brainstorm session dir is invisible to git status"
+else
+  fail "brainstorm session dir is invisible to git status" "status: $status"
+fi
+
+git -C "$TEST_DIR/gitproject" add -A
+staged=$(git -C "$TEST_DIR/gitproject" diff --cached --name-only)
+if [[ "$staged" != *".superpowers"* ]]; then
+  pass "git add -A does not stage brainstorm session files"
+else
+  fail "git add -A does not stage brainstorm session files" "staged: $staged"
+fi
+
+echo ""
 echo "--- Results: $passed passed, $failed failed ---"
 if [[ $failed -gt 0 ]]; then
   exit 1

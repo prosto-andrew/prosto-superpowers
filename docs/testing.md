@@ -40,3 +40,6 @@ These run on a plain Windows Git Bash install and need nothing else:
 - `tests/claude-code/test-subagent-driven-development.sh` runs `claude -p`
   against the installed plugin (not the working tree) and costs tokens. It uses
   normal permission checks. Upstream's tests that bypassed them were removed.
+- `tests/claude-code/test-worktree-native-preference.sh [red|green|pressure|all] [runs]`
+  also runs `claude -p`, once per run, to check that the agent prefers native
+  worktree tools. It is not in `run-skill-tests.sh`; run it by hand.

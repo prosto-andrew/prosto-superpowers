@@ -29,9 +29,11 @@ main() {
     TEST_ROOT="$(mktemp -d)"
     trap cleanup EXIT
 
-    # Resolve repo to its physical path so string comparisons match the
-    # helper's output (git rev-parse --show-toplevel resolves symlinks; on
-    # macOS mktemp lives under /var -> /private/var).
+    # Spell repo the way git does: the helpers print paths in git's spelling.
+    # git rev-parse --show-toplevel resolves symlinks (on macOS mktemp lives
+    # under /var -> /private/var) and on Windows prints C:/..., which bash and
+    # the agent's file tools both open; pwd there prints an MSYS path such as
+    # /tmp/..., which the file tools cannot.
     git init -q -b main "$TEST_ROOT/repo"
     local repo
     repo="$(cd "$TEST_ROOT/repo" && git rev-parse --show-toplevel)"
@@ -333,6 +335,25 @@ PLAN
         echo "    abs:    $dir_abs"
         echo "    dotdot: $dir_dotdot"
         echo "    marker: $(cat "$dir_rel/plan-path" 2>/dev/null)"
+    fi
+
+    # --- Absolute marker for an in-repo plan (written by earlier versions on
+    # Windows, where git and pwd spell the repo root differently) still
+    # belongs to that plan and is rewritten repo-relative ---
+    printf '# Qux\n\n## Task 1: Qux\n\nQux.\n' > "$repo/qux.md"
+    mkdir -p "$repo/.superpowers/sdd/qux"
+    printf '%s\n' "$(cd "$repo" && pwd -P)/qux.md" > "$repo/.superpowers/sdd/qux/plan-path"
+    printf 'qux ledger\n' > "$repo/.superpowers/sdd/qux/progress.md"
+    local dir_qux
+    dir_qux="$(cd "$repo" && "$SDD_SCRIPTS/sdd-workspace" qux.md)"
+    if [[ "$dir_qux" == "$repo/.superpowers/sdd/qux" \
+        && "$(cat "$dir_qux/progress.md" 2>/dev/null)" == "qux ledger" \
+        && "$(cat "$dir_qux/plan-path" 2>/dev/null)" == "qux.md" ]]; then
+        pass "absolute marker naming this plan is kept and rewritten repo-relative"
+    else
+        fail "absolute marker naming this plan is kept and rewritten repo-relative"
+        echo "    dir:    $dir_qux"
+        echo "    marker: $(cat "$dir_qux/plan-path" 2>/dev/null)"
     fi
 
     # --- Out-of-repo plans keep working, marker holds the absolute path ---

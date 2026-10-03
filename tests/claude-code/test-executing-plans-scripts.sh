@@ -31,6 +31,8 @@ main() {
     trap cleanup EXIT
 
     git init -q -b main "$TEST_ROOT/repo"
+    # git's spelling of the root (C:/... on Windows): the helpers print paths
+    # in it, so the agent's file tools can open them.
     local repo
     repo="$(cd "$TEST_ROOT/repo" && git rev-parse --show-toplevel)"
     local git_id=(-c user.email=t@example.com -c user.name=t -c commit.gpgsign=false)

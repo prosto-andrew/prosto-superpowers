@@ -55,7 +55,7 @@ without repeating it.
 
 **Finding connection info:** The server writes its startup JSON to `$STATE_DIR/server-info`. If you launched the server in the background and didn't capture stdout, read that file to get the URL and port. When using `--project-dir`, check `<project>/.superpowers/brainstorm/` for the session directory.
 
-**Note:** Pass the project root as `--project-dir` so mockups persist in `.superpowers/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. Remind the user to add `.superpowers/` to `.gitignore` if it's not already there.
+**Note:** Pass the project root as `--project-dir` so mockups persist in `.superpowers/brainstorm/` and survive server restarts. Without it, files go to `/tmp` and get cleaned up. The script makes `.superpowers/brainstorm/` ignore itself (a `.gitignore` holding `*`), so session files — which hold the session key and the user's choices — stay out of commits without editing the project's own `.gitignore`.
 
 **Launching the server by platform:**
 
