@@ -1,7 +1,10 @@
 # superpowers-custom — Guidelines for Agents Working in This Repository
 
-This repository is a private, local fork of [obra/superpowers](https://github.com/obra/superpowers)
-v6.4.2 (commit `8ca22db`). It exists for one reason: **nothing in it sends data
+This repository is a custom fork of [obra/superpowers](https://github.com/obra/superpowers)
+v6.4.2 (commit `8ca22db`), published as the default branch `custom` of the
+**public** GitHub repository `prosto-andrew/prosto-superpowers`. Claude Code on
+your human partner's machine loads the plugin straight from this working tree.
+It exists for one reason: **nothing in it sends data
 off the machine on its own, and nothing it tells an agent to do sends data
 without an explicit yes from your human partner.** Every rule below serves that.
 
@@ -80,8 +83,28 @@ Gemini CLI (`gemini-extension.json`, `GEMINI.md`) and Hermes Agent
 (`.hermes-plugin/`). Support for the others upstream ships was removed; do not
 add a harness without your human partner asking for it.
 
+## Public repository
+
+Everything committed here ends up public once pushed, and a pushed secret
+stays in history even after it is deleted. So:
+
+- **Never commit** secrets, tokens, keys or `.env` files, session
+  transcripts, `diagnosing-sessions` case files or reports, brainstorm
+  workspaces (`.superpowers/`), local settings (`.claude/`), or
+  machine-specific paths and names. Check `git status` and the staged diff
+  before every commit.
+- **Commits are authored `Andrew <>`** (set in this repository's local git
+  config) and carry no `Claude-Session` trailer or session link.
+- **Push only with your human partner's yes**, only to the `custom` branch of
+  their fork, never with force. Work from another session (a cloud session,
+  a helper branch) is reviewed and tested here before it lands in `custom`.
+- **Keep this working tree on `custom`.** Claude Code loads the plugin from
+  it, so checking out another branch changes the plugin every new session
+  runs.
+
 ## Upstream
 
 This fork does not contribute back and must never open issues or pull requests
 against obra/superpowers. The upstream remote is named `upstream`; the working
-branch is `custom`.
+branch is `custom`. The fork's `main` mirrors upstream, so `main...custom`
+shows exactly what this fork changed.

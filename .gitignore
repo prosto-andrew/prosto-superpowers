@@ -3,6 +3,12 @@
 .claude/
 .superpowers/
 .DS_Store
+
+# This fork is a public repository: keep credentials out by default.
+.env
+.env.*
+*.pem
+*.key
 node_modules/
 inspo
 triage/
