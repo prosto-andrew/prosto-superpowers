@@ -20,9 +20,10 @@ without an explicit yes from your human partner.** Every rule below serves that.
   behind the rule "Network commands need their own yes", worded identically in
   every file that carries it. Adding a new gated command means adding it to the
   allowlist in `tests/no-egress/test-no-egress.sh` with its reason.
-- **`diagnosing-sessions` is local only.** It must never regain issue search or
-  filing, bundles, archives, scrubbing for export, or any upload. Its structure
-  test fails on any of them.
+- **No session-diagnosis skill.** Upstream's diagnosis skill (issue filing,
+  transcript bundles) and this fork's local `diagnosing-sessions` were both
+  removed. Do not bring either back without your human partner asking; the
+  guard fails on the upstream skill's name anywhere in the tree.
 - **The companion binds loopback only.** Do not reintroduce a host option, a
   bind to all interfaces, or a shell-executed open command.
 - **No test may bypass permission checks.** Upstream's tests that ran `claude`
@@ -32,10 +33,9 @@ without an explicit yes from your human partner.** Every rule below serves that.
 
 ```bash
 bash tests/no-egress/test-no-egress.sh
-bash tests/diagnosing-sessions/test-skill-structure.sh
 ```
 
-Both must pass. If the guard reports a hit, remove the path out — do not widen
+It must pass, and so must the tests for whatever you touched (`docs/testing.md`). If the guard reports a hit, remove the path out — do not widen
 the patterns or allowlist it to make the test green unless your human partner
 has agreed that the specific line is harmless, and record the reason beside it.
 
@@ -89,8 +89,8 @@ Everything committed here ends up public once pushed, and a pushed secret
 stays in history even after it is deleted. So:
 
 - **Never commit** secrets, tokens, keys or `.env` files, session
-  transcripts, `diagnosing-sessions` case files or reports, brainstorm
-  workspaces (`.superpowers/`), local settings (`.claude/`), or
+  transcripts or anything quoted from them, brainstorm workspaces
+  (`.superpowers/`), local settings (`.claude/`), or
   machine-specific paths and names. Check `git status` and the staged diff
   before every commit.
 - **Commits are authored `Andrew <>`** (set in this repository's local git

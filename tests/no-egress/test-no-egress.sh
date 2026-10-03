@@ -31,7 +31,6 @@ fail() { echo "  [FAIL] $1"; FAILURES=$((FAILURES + 1)); }
 # Files that carry these patterns as data: the guards themselves.
 SELF_EXCLUDES=(
   tests/no-egress/test-no-egress.sh
-  tests/diagnosing-sessions/test-skill-structure.sh
 )
 
 # Allowlist: path, a fixed substring of the matching line, and why it is fine.
@@ -246,6 +245,10 @@ done
 REMOVED='primeradiant|mintcdn|unsplash|BRAINSTORM_OPEN_CMD|BRAINSTORM_(URL_)?HOST|SUPERPOWERS_BRAND_IMAGE_URL|TELEMETRY_DISABLE_ENV_VARS|0\.0\.0\.0|diagnosing-superpowers|openai-codex-plugins|dangerously-skip-permissions|bypassPermissions'
 report "tree: removed telemetry, remote binds, upstream reporting and permission bypasses stay out" \
   "$(grep -n -i -E "$REMOVED" "${TREE[@]}" 2>/dev/null)"
+# The same names in file paths: a restored skill directory can come back
+# without its name appearing in any file's content.
+report "tree: no file path names a removed component" \
+  "$(printf '%s\n' "${TREE[@]}" | grep -i -E "$REMOVED" | sed 's/.*/&:0:(file path)/')"
 
 # --- allowlist hygiene ----------------------------------------------------
 # An entry that matches nothing is stale. The gate sentence is exempt: it only

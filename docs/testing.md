@@ -12,9 +12,6 @@ These run on a plain Windows Git Bash install and need nothing else:
   resource in skills, every network command in a skill gated and allowlisted,
   and none of the removed telemetry, remote-bind, upstream-reporting or
   permission-bypass code back in the tree. Run it after every upstream merge.
-- `tests/diagnosing-sessions/test-skill-structure.sh` — structure of the
-  local-only diagnosing skill (frontmatter, referenced files, word budget) plus
-  its no-outbound checks.
 - `tests/claude-code/test-worktree-path-policy.sh`,
   `tests/claude-code/test-sdd-workspace.sh`,
   `tests/claude-code/test-executing-plans-scripts.sh` — the SDD and
