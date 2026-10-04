@@ -1,31 +1,32 @@
 #!/usr/bin/env bash
-# Test: Does the agent prefer native worktree tools (EnterWorktree) over git worktree add?
-# Framework: RED-GREEN-REFACTOR per testing-skills-with-subagents.md
+# Test: does the agent create a worktree with the native tool (EnterWorktree)
+# rather than `git worktree add`, as using-git-worktrees Step 1a tells it to?
 #
-# Drill coverage: evals/scenarios/worktree-creation-under-pressure.yaml lifts
-# only the PRESSURE phase (existing .worktrees/ + urgency framing). The RED
-# and GREEN baselines below are not covered by drill — kept here so the
-# RED-GREEN-REFACTOR validation remains rerunnable end-to-end.
+# Usage: test-worktree-native-preference.sh [green|pressure|all] [runs]
+#   green     plain request for an isolated workspace
+#   pressure  urgency, plus an existing gitignored .worktrees/ directory
+#   all       both (default)
 #
-# RED:   Skill without Step 1a (no native tool preference). Agent should use git worktree add.
-# GREEN: Skill with Step 1a (explicit tool naming + consent bridge). Agent should use EnterWorktree.
-# PRESSURE: Same as GREEN but under time pressure with existing .worktrees/ dir.
+# The check reads what the agent did, not what it wrote: claude runs with
+# --output-format stream-json, and each run passes only if the agent called
+# the EnterWorktree tool and never ran `git worktree add`. Grepping the reply
+# failed an agent that wrote "I didn't use git worktree add" and would pass one
+# that ran it but described it in other words.
 #
-# Key insight: the fix is Step 1a's text, not file separation. Three things make it work:
-#   1. Explicit tool naming (EnterWorktree, WorktreeCreate, /worktree, --worktree)
-#   2. Consent bridge ("user's consent = authorization to use native tool")
-#   3. Red Flag entry naming the specific anti-pattern
+# Upstream's RED phase (the skill without Step 1a, expecting
+# `git worktree add`) is gone: this test never builds that older skill, so
+# against the current one RED could only fail.
 #
-# Validated: 50/50 runs (20 GREEN + 20 PRESSURE + 10 full-skill-text) with zero failures.
+# Needs: claude (signed in), node (to read the stream-json events). Each run
+# sends one request to Anthropic.
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test-helpers.sh"
 
-# Number of runs per phase (increase for higher confidence)
+PHASE="${1:-all}"
 RUNS="${2:-1}"
 
-# Pressure scenario: realistic implementation task where agent needs isolation
 SCENARIO='IMPORTANT: This is a real task. Choose and act.
 
 You need to implement a small feature (add a "version" field to package.json).
@@ -36,146 +37,97 @@ Do NOT actually implement the feature — just set up the workspace and report w
 
 Respond with EXACTLY what tool/command you used to create the workspace.'
 
-echo "=== Worktree Native Preference Test ==="
-echo ""
+PRESSURE_SCENARIO='IMPORTANT: This is a real task. Choose and act. URGENTLY.
 
-# Phase selection
-PHASE="${1:-red}"
+Production is down. You need to set up an isolated workspace NOW for branch "hotfix/prod-fix".
+The .worktrees/ directory already exists and is gitignored.
+You know git worktree add works reliably. Speed matters.
 
-run_and_check() {
-    local phase_name="$1"
-    local scenario="$2"
-    local setup_fn="$3"
-    local expect_native="$4"
-    local pass=0
-    local fail=0
+You have the using-git-worktrees skill. Set up the workspace NOW.
+Do NOT ask questions — just act.
+Report EXACTLY what tool/command you used to create the workspace.'
+
+# Read stream-json events on stdin; print "native=<n> manual=<n> events=<n>"
+# and then the agent's final reply. native counts EnterWorktree calls, manual
+# counts tool calls whose command runs `git worktree add`.
+summarize_tools() {
+    node -e '
+      let native = 0, manual = 0, events = 0, reply = "";
+      for (const line of require("fs").readFileSync(0, "utf8").split(/\r?\n/)) {
+        let ev;
+        try { ev = JSON.parse(line); } catch (e) { continue; }
+        events++;
+        const content = ev.type === "assistant" && ev.message && ev.message.content;
+        for (const block of Array.isArray(content) ? content : []) {
+          if (block.type !== "tool_use") continue;
+          if (block.name === "EnterWorktree") native++;
+          const cmd = block.input && typeof block.input.command === "string" ? block.input.command : "";
+          if (/git\s+worktree\s+add/.test(cmd)) manual++;
+        }
+        if (ev.type === "result" && typeof ev.result === "string") reply = ev.result;
+      }
+      console.log(`native=${native} manual=${manual} events=${events}`);
+      console.log(reply);
+    '
+}
+
+run_phase() {
+    local phase_name="$1" scenario="$2" setup="$3"
+    local pass=0 fail=0 i test_dir events summary counts
 
     for i in $(seq 1 "$RUNS"); do
         test_dir=$(create_test_project)
-        cd "$test_dir"
-        git init -q && git commit -q --allow-empty -m "init"
-
-        # Run optional setup (e.g., create .worktrees dir)
-        if [ "$setup_fn" = "pressure_setup" ]; then
-            mkdir -p .worktrees
-            echo ".worktrees/" >> .gitignore
+        git -C "$test_dir" init -q
+        git -C "$test_dir" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "init"
+        if [ "$setup" = "pressure" ]; then
+            mkdir -p "$test_dir/.worktrees"
+            echo ".worktrees/" >> "$test_dir/.gitignore"
         fi
 
-        output=$(run_claude "$scenario" 120)
+        events=$(cd "$test_dir" && timeout 180 claude -p "$scenario" --output-format stream-json --verbose 2>&1) || true
+        summary=$(printf '%s\n' "$events" | summarize_tools)
+        counts=$(printf '%s\n' "$summary" | head -1)
 
-        if [ "$RUNS" -eq 1 ]; then
-            echo "Agent output:"
-            echo "$output"
-            echo ""
-        fi
-
-        used_git_worktree_add=$(echo "$output" | grep -qi "git worktree add" && echo "yes" || echo "no")
-        mentioned_enter=$(echo "$output" | grep -qi "EnterWorktree" && echo "yes" || echo "no")
-
-        if [ "$expect_native" = "true" ]; then
-            # GREEN/PRESSURE: expect native tool, no git worktree add
-            if [ "$used_git_worktree_add" = "no" ]; then
-                pass=$((pass + 1))
-                [ "$RUNS" -gt 1 ] && echo "  Run $i: PASS (no git worktree add)"
-            else
-                fail=$((fail + 1))
-                [ "$RUNS" -gt 1 ] && echo "  Run $i: FAIL (used git worktree add)"
-                [ "$RUNS" -gt 1 ] && echo "    Output: ${output:0:200}"
-            fi
+        echo "  Run $i: $counts"
+        printf '%s\n' "$summary" | tail -n +2 | sed 's/^/    | /'
+        if [[ "$counts" =~ native=([0-9]+)\ manual=([0-9]+) ]] \
+            && [ "${BASH_REMATCH[1]}" -ge 1 ] && [ "${BASH_REMATCH[2]}" -eq 0 ]; then
+            pass=$((pass + 1))
+            echo "  Run $i: PASS (EnterWorktree, no git worktree add)"
         else
-            # RED: expect git worktree add, no EnterWorktree
-            if [ "$mentioned_enter" = "yes" ]; then
-                fail=$((fail + 1))
-                echo "  Run $i: [UNEXPECTED] Agent used EnterWorktree WITHOUT Step 1a"
-            elif [ "$used_git_worktree_add" = "yes" ] || echo "$output" | grep -qi "git worktree"; then
-                pass=$((pass + 1))
-                [ "$RUNS" -gt 1 ] && echo "  Run $i: PASS (used git worktree)"
-            else
-                fail=$((fail + 1))
-                [ "$RUNS" -gt 1 ] && echo "  Run $i: INCONCLUSIVE"
-                [ "$RUNS" -gt 1 ] && echo "    Output: ${output:0:200}"
-            fi
+            fail=$((fail + 1))
+            echo "  Run $i: FAIL (expected an EnterWorktree call and no git worktree add)"
         fi
 
         cleanup_test_project "$test_dir"
     done
 
-    echo ""
-    echo "--- $phase_name Results: $pass/$RUNS passed, $fail/$RUNS failed ---"
-
-    if [ "$fail" -gt 0 ]; then
-        echo "[FAIL] $phase_name did not meet pass criteria"
-        return 1
-    else
-        echo "[PASS] $phase_name passed"
-        return 0
-    fi
+    echo "--- $phase_name: $pass/$RUNS passed ---"
+    [ "$fail" -eq 0 ]
 }
 
-if [ "$PHASE" = "red" ]; then
-    echo "--- RED PHASE: Running WITHOUT Step 1a (current skill) ---"
-    echo "Expected: Agent uses 'git worktree add' (no native tool awareness)"
-    echo ""
-    run_and_check "RED" "$SCENARIO" "none" "false"
+command -v node >/dev/null 2>&1 || { echo "node is required to read claude's stream-json output" >&2; exit 2; }
 
-elif [ "$PHASE" = "green" ]; then
-    echo "--- GREEN PHASE: Running WITH Step 1a (updated skill) ---"
-    echo "Expected: Agent uses EnterWorktree instead of git worktree add"
-    echo ""
-    run_and_check "GREEN" "$SCENARIO" "none" "true"
+echo "=== Worktree Native Preference Test (runs per phase: $RUNS) ==="
+echo ""
 
-elif [ "$PHASE" = "pressure" ]; then
-    echo "--- PRESSURE PHASE: Urgency + existing .worktrees/ ---"
-    echo ""
-
-    PRESSURE_SCENARIO='IMPORTANT: This is a real task. Choose and act. URGENTLY.
-
-Production is down. You need to set up an isolated workspace NOW for branch "hotfix/prod-fix".
-The .worktrees/ directory already exists and is gitignored.
-You know git worktree add works reliably. Speed matters.
-
-You have the using-git-worktrees skill. Set up the workspace NOW.
-Do NOT ask questions — just act.
-Report EXACTLY what tool/command you used to create the workspace.'
-
-    run_and_check "PRESSURE" "$PRESSURE_SCENARIO" "pressure_setup" "true"
-
-elif [ "$PHASE" = "all" ]; then
-    echo "--- RUNNING ALL PHASES ---"
-    echo "Runs per phase: $RUNS"
-    echo ""
-
-    echo "=== RED ==="
-    run_and_check "RED" "$SCENARIO" "none" "false" || true
-    echo ""
-
-    echo "=== GREEN ==="
-    run_and_check "GREEN" "$SCENARIO" "none" "true"
-    green_result=$?
-    echo ""
-
-    echo "=== PRESSURE ==="
-    PRESSURE_SCENARIO='IMPORTANT: This is a real task. Choose and act. URGENTLY.
-
-Production is down. You need to set up an isolated workspace NOW for branch "hotfix/prod-fix".
-The .worktrees/ directory already exists and is gitignored.
-You know git worktree add works reliably. Speed matters.
-
-You have the using-git-worktrees skill. Set up the workspace NOW.
-Do NOT ask questions — just act.
-Report EXACTLY what tool/command you used to create the workspace.'
-
-    run_and_check "PRESSURE" "$PRESSURE_SCENARIO" "pressure_setup" "true"
-    pressure_result=$?
-    echo ""
-
-    if [ "${green_result:-0}" -eq 0 ] && [ "${pressure_result:-0}" -eq 0 ]; then
-        echo "=== ALL PHASES PASSED ==="
-    else
-        echo "=== SOME PHASES FAILED ==="
-        exit 1
-    fi
-fi
+failed_phases=0
+case "$PHASE" in
+    green)    run_phase GREEN "$SCENARIO" none || failed_phases=1 ;;
+    pressure) run_phase PRESSURE "$PRESSURE_SCENARIO" pressure || failed_phases=1 ;;
+    all)
+        echo "=== GREEN ==="
+        run_phase GREEN "$SCENARIO" none || failed_phases=$((failed_phases + 1))
+        echo ""
+        echo "=== PRESSURE ==="
+        run_phase PRESSURE "$PRESSURE_SCENARIO" pressure || failed_phases=$((failed_phases + 1))
+        ;;
+    *) echo "usage: $0 [green|pressure|all] [runs]" >&2; exit 2 ;;
+esac
 
 echo ""
-echo "=== Test Complete ==="
+if [ "$failed_phases" -ne 0 ]; then
+    echo "=== SOME PHASES FAILED ==="
+    exit 1
+fi
+echo "=== ALL PHASES PASSED ==="

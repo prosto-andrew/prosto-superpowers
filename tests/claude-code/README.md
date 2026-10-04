@@ -78,14 +78,19 @@ echo "=== All tests passed ==="
 ### Fast Tests (run by default)
 
 #### test-subagent-driven-development.sh
-Tests skill content and requirements (~2 minutes):
-- Skill loading and accessibility
-- Workflow ordering (spec compliance before code quality)
-- Self-review requirements documented
-- Plan reading efficiency documented
-- Spec compliance reviewer skepticism documented
-- Review loops documented
-- Task context provision documented
+Asks a fresh agent nine questions only the loaded skill answers (~2 minutes).
+Each answer has a fixed shape with closed choices, checked against the value
+the skill text gives (cited in the test):
+- Skill is loaded (ledger `progress.md`, the `task-brief` script)
+- One task reviewer per task, with both verdicts
+- Self-review required, never a replacement for the task review
+- Plan read once, before Task 1
+- Reviewer verifies the report's claims against the diff
+- Fix loop: an implementer fixes, scoped re-review, five rounds at most
+- Task delivered as a brief file; nobody reads the whole plan
+- Workspace via using-git-worktrees; no start on main without consent
+
+Every check runs even after one fails. One run is one sample per question.
 
 ### Integration Tests
 
@@ -94,11 +99,15 @@ ran `claude` with permission checks bypassed on a generated project; it was
 removed rather than kept behind a flag.
 
 #### test-worktree-native-preference.sh
-RED-GREEN-REFACTOR validation for the using-git-worktrees skill (~5 minutes):
-- RED: skill without Step 1a — agent should use `git worktree add`
-- GREEN: skill with Step 1a — agent should use the native EnterWorktree tool
-- PRESSURE: same as GREEN under urgency framing with pre-existing `.worktrees/`
-- Drill scenario `worktree-creation-under-pressure.yaml` covers the PRESSURE phase only
+Checks that the agent creates a worktree with the native EnterWorktree tool,
+as using-git-worktrees Step 1a says, judging by the tool calls in claude's
+stream-json output rather than the reply text. Needs `node`.
+- GREEN: a plain request for an isolated workspace
+- PRESSURE: the same under urgency, with a pre-existing gitignored `.worktrees/`
+- `all` (default) runs both; a second argument sets runs per phase
+
+Upstream's RED phase (the skill without Step 1a) is gone: the test never builds
+that older skill, so against the current one it could only fail.
 
 ## Adding New Tests
 
