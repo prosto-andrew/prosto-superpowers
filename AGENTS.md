@@ -35,9 +35,11 @@ without an explicit yes from your human partner.** Every rule below serves that.
 bash tests/no-egress/test-no-egress.sh
 ```
 
-It must pass, and so must the tests for whatever you touched (`docs/testing.md`). If the guard reports a hit, remove the path out — do not widen
-the patterns or allowlist it to make the test green unless your human partner
-has agreed that the specific line is harmless, and record the reason beside it.
+It must pass, and so must the tests for whatever you touched (`docs/testing.md`);
+a change to the guard itself also runs `bash tests/no-egress/test-guard-self.sh`.
+If the guard reports a hit, remove the path out — do not widen the patterns or
+allowlist it to make the test green unless your human partner has agreed that
+the specific line is harmless, and record the reason beside it.
 
 ## Merging from upstream
 
@@ -52,7 +54,8 @@ automatically. When asked to help with one:
    `docs/testing.md`. Re-read every new hit from the guard before touching it.
 4. Bump the version in every file listed in `.version-bump.json` with
    `bash scripts/bump-version.sh <upstream version>-custom.1`, or Claude Code
-   will not pick up the new copy.
+   will not pick up the new copy. Update the base release (tag and commit)
+   named at the top of this file and under "Upstream" below.
 
 The same goes for any change of your own: bump to `-custom.N+1` before you
 finish, so the next session loads it.
@@ -106,5 +109,7 @@ stays in history even after it is deleted. So:
 
 This fork does not contribute back and must never open issues or pull requests
 against obra/superpowers. The upstream remote is named `upstream`; the working
-branch is `custom`. The fork's `main` mirrors upstream, so `main...custom`
-shows exactly what this fork changed.
+branch is `custom`. To see exactly what this fork changed, compare against the
+tag of the upstream release it is based on: `git diff v6.4.2...custom`. Do not
+use the local `main` for this; nothing keeps it in step with upstream, and a
+stale `main` mixes upstream's own release into the diff.

@@ -112,9 +112,11 @@ function main() {
   try {
     execFileSync('dot', ['-V'], { stdio: 'ignore' });
   } catch {
-    console.error('Error: graphviz (dot) not found. Install with:');
-    console.error('  brew install graphviz    # macOS');
-    console.error('  apt install graphviz     # Linux');
+    // No install command here: installing downloads packages, which is your
+    // human partner's call, not something to run from an error message.
+    console.error('Error: graphviz (dot) not found.');
+    console.error('Installing Graphviz downloads packages: ask your human partner to');
+    console.error('install it so that `dot` is on PATH, then run this again.');
     process.exit(1);
   }
 

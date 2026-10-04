@@ -31,6 +31,7 @@ fail() { echo "  [FAIL] $1"; FAILURES=$((FAILURES + 1)); }
 # Files that carry these patterns as data: the guards themselves.
 SELF_EXCLUDES=(
   tests/no-egress/test-no-egress.sh
+  tests/no-egress/test-guard-self.sh
 )
 
 # Allowlist: path, a fixed substring of the matching line, and why it is fine.
@@ -68,7 +69,7 @@ allow skills/brainstorming/scripts/helper.js "return 'ws://' + window.location.h
   "$LOCAL: the page's own origin, which is the loopback companion"
 allow skills/brainstorming/scripts/helper.js 'ws = new WebSocket(websocketUrl());' \
   "$LOCAL: websocketUrl() is the page's own origin"
-allow skills/brainstorming/scripts/server.cjs "return 'http://' + urlHostForHttp(URL_HOST)" \
+allow skills/brainstorming/scripts/server.cjs "return 'http://' + URL_HOST + ':' + PORT" \
   "$LOCAL: URL_HOST is the constant 'localhost'; this builds the URL shown to the user"
 allow skills/brainstorming/scripts/server.cjs "return origin === 'http://' + host;" \
   'a string comparison for the WebSocket origin check; no request'
@@ -105,7 +106,8 @@ is_self() {
 
 # report NAME HITS — HITS is newline-separated "path:line:content". Takes its
 # input as an argument, not stdin, so it runs in this shell and the counters
-# and allowlist bookkeeping survive.
+# and allowlist bookkeeping survive. Every grep feeding it passes -H: over a
+# single file grep would drop the path, and the allowlist could not match.
 report() {
   local name="$1" hits="" line path rest content
   while IFS= read -r line; do
@@ -147,7 +149,9 @@ read_lines() {
   while IFS= read -r _line; do eval "$1+=(\"\$_line\")"; done
 }
 
-read_lines CODE_FILES < <(list_files | grep -E '\.(cjs|js|mjs|ts|py|sh|ps1|html|cmd)$|^hooks/|^skills/[^/]+/scripts/' | grep -v 'package-lock\.json$')
+# SVG and CSS count as code: a harness renders them (the Codex icon is an SVG)
+# and both can name remote resources.
+read_lines CODE_FILES < <(list_files | grep -E '\.(cjs|js|mjs|ts|py|sh|ps1|html|cmd|svg|css)$|^hooks/|^skills/[^/]+/scripts/' | grep -v 'package-lock\.json$')
 read_lines MANIFESTS < <(list_files | grep -E '\.(json|ya?ml|toml)$' | grep -v 'package-lock\.json$')
 read_lines SKILL_MD < <(list_files | grep -E '^skills/.*\.md$')
 # History and licence texts are exempt: they describe upstream, not this fork.
@@ -168,7 +172,13 @@ fi
 # matched as one loopback URL and swallowed the scheme of the second. Userinfo
 # that needs those characters is caught by the userinfo check below instead.
 LOCAL_HOST='^(localhost|127\.0\.0\.1|\[::1\])$'
+# Schemes match in any case (grep -i below): browsers, Node and Python all
+# fetch HTTPS://host the same as https://host.
 URL_RE='(https?|wss?)://[][A-Za-z0-9._~%:@-]*[]A-Za-z0-9]'
+# An XML namespace declaration (xmlns="http://www.w3.org/2000/svg") names a
+# vocabulary; no parser or browser fetches it. Matched together with the URL
+# so it can be skipped; any other URL in the same file is still checked.
+NS_ATTR="xmlns(:[A-Za-z0-9._-]+)?=[\"']"
 # Manifest fields that only describe the project; no harness fetches them.
 META_KEY='"(homepage|repository|websiteURL|privacyPolicyURL|termsOfServiceURL)"[[:space:]]*:'
 # non_loopback_urls FILE... — "path:line:source line" for each URL whose host
@@ -178,11 +188,13 @@ non_loopback_urls() {
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
     path="${hit%%:*}"; rest="${hit#*:}"; lineno="${rest%%:*}"; url="${rest#*:}"
+    case "$url" in xmlns*) continue ;; esac
     authority="${url#*://}"; host="${authority##*@}"
     if [[ "$host" == \[* ]]; then host="${host%%]*}]"; else host="${host%%:*}"; fi
+    host=$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')
     [[ "$host" =~ $LOCAL_HOST ]] && continue
     printf '%s:%s:%s\n' "$path" "$lineno" "$(sed -n "${lineno}p" "$path")"
-  done < <(grep -noE "$URL_RE" "$@" 2>/dev/null)
+  done < <(grep -HnoiE "($NS_ATTR)?$URL_RE" "$@" 2>/dev/null)
 }
 report "code: no URL to a non-loopback host" "$(non_loopback_urls "${CODE_FILES[@]}")"
 report "manifests: no URL to a non-loopback host outside project metadata" \
@@ -192,26 +204,28 @@ report "manifests: no URL to a non-loopback host outside project metadata" \
 # host, and http://localhost;x@evil.com stops the URL scan above at the ;.
 # Nothing in this plugin needs credentials in a URL, so every one is a hit.
 report "code and manifests: no URL with userinfo" \
-  "$(grep -nE "(https?|wss?)://[^/?#[:space:]\"'\`]*@" "${CODE_FILES[@]}" "${MANIFESTS[@]}" 2>/dev/null)"
+  "$(grep -HniE "(https?|wss?)://[^/?#[:space:]\"'\`]*@" "${CODE_FILES[@]}" "${MANIFESTS[@]}" 2>/dev/null)"
 
 # Protocol-relative URLs (//host/...) take the page's scheme, so they reach
 # any host without naming one. Only in an attribute, a CSS url(), or at the
 # start of a string literal; a // comment has a space or sits outside quotes.
 report "code: no protocol-relative URL" \
-  "$(grep -nE "(src|href|action|poster|srcset|data)[[:space:]]*=[[:space:]]*[\"']?//[^/[:space:]]|url\([[:space:]]*[\"']?//[^/[:space:]]|[\"'\`]//[A-Za-z0-9-]+\.[A-Za-z0-9.-]+" "${CODE_FILES[@]}" 2>/dev/null)"
+  "$(grep -HnE "(src|href|action|poster|srcset|data)[[:space:]]*=[[:space:]]*[\"']?//[^/[:space:]]|url\([[:space:]]*[\"']?//[^/[:space:]]|[\"'\`]//[A-Za-z0-9-]+\.[A-Za-z0-9.-]+" "${CODE_FILES[@]}" 2>/dev/null)"
 
 # URLs built at runtime: a scheme literal followed by a quote or `${`, so the
 # host comes from a variable or a concatenation and the scan above cannot see
 # it. Each one must be allowlisted with the reason its host is local.
 report "code: no URL with a runtime-built host" \
-  "$(grep -nE "(https?|wss?)://['\"\`]|(https?|wss?)://\\$\\{" "${CODE_FILES[@]}" 2>/dev/null)"
+  "$(grep -HniE "(https?|wss?)://['\"\`]|(https?|wss?)://\\$\\{" "${CODE_FILES[@]}" 2>/dev/null)"
 
 # Modules and commands that only exist to reach another host.
 # dns is here too: a lookup of <data>.attacker.example carries <data> out.
 NET_API="require\\(['\"](node:)?(https|http2|net|dgram|tls|dns)(/promises)?['\"]\\)|from ['\"](node:)?(https?|http2|net|dgram|tls|dns)(/promises)?['\"]|XMLHttpRequest|sendBeacon|navigator\\.|urllib|http\\.client|requests\\.(get|post|put|patch|delete|head|request|Session)\\(|httpx|aiohttp|socket\\.(socket|create_connection|gethostbyname|getaddrinfo)|asyncio\\.open_connection|dnspython|import dns"
-NET_CMD='curl |wget |gh (issue|api|pr|repo|search|gist)|git (push|fetch|pull|clone)|npm (install|ci|i)([^a-z]|$)|npx |pip install|/dev/(tcp|udp)/|\bnc |\bncat |Invoke-(WebRequest|RestMethod)|Net\.WebClient|Start-BitsTransfer'
+# Package managers are listed one by one: every install downloads, and an
+# install command printed for the agent is an instruction like any other.
+NET_CMD='curl |curl\.exe|wget |\biwr |\birm |gh (issue|api|pr|repo|search|gist|release|run|workflow|auth|browse|secret)|git (push|fetch|pull|clone|ls-remote|remote update|submodule update)|npm (install|ci|i)([^a-z]|$)|npx |pip3? install|pipx install|uv (pip|sync|add|tool)|yarn (install|add)|pnpm (install|add|i)([^a-z]|$)|bun (install|add)|gem install|bundle install|composer (install|require)|brew (install|upgrade|update)|apt(-get)? (install|update|upgrade)|winget install|choco install|scoop install|certutil.*-urlcache|bitsadmin|/dev/(tcp|udp)/|\bnc |\bncat |Invoke-(WebRequest|RestMethod)|Net\.WebClient|Start-BitsTransfer'
 report "code: no raw network API or network command" \
-  "$(grep -nE "$NET_API|$NET_CMD" "${CODE_FILES[@]}" 2>/dev/null)"
+  "$(grep -HnE "$NET_API|$NET_CMD" "${CODE_FILES[@]}" 2>/dev/null)"
 
 # Request calls. A call is fine when its line names a loopback host; any other
 # call must be allowlisted with the reason its target is local. The host must
@@ -219,16 +233,16 @@ report "code: no raw network API or network command" \
 NET_CALL="(^|[^A-Za-z0-9_.])fetch\\(|new WebSocket\\(|EventSource\\(|\\bhttps?\\.(get|request)\\(|require\\(['\"](node:)?https?['\"]\\)\\.(get|request)\\("
 LOOPBACK_ON_LINE="[\"'\`/](localhost|127\\.0\\.0\\.1|\\[::1\\])([^@A-Za-z0-9._~%-]|$)"
 report "code: every request call targets loopback" \
-  "$(grep -nE "$NET_CALL" "${CODE_FILES[@]}" 2>/dev/null | grep -vE "$LOOPBACK_ON_LINE")"
+  "$(grep -HnE "$NET_CALL" "${CODE_FILES[@]}" 2>/dev/null | grep -vE "$LOOPBACK_ON_LINE")"
 
 # --- 2. skill markdown ----------------------------------------------------
 AUTOLOAD='<img[^>]*src=.?https?:|<(script|link|iframe|video|audio|source)[^>]*(src|href)=.?https?:|@import|url\(.?https?:|!\[[^]]*\]\(https?:'
 report "skills: no auto-loaded remote resource" \
-  "$(grep -nE -i "$AUTOLOAD" "${SKILL_MD[@]}" 2>/dev/null)"
+  "$(grep -HnE -i "$AUTOLOAD" "${SKILL_MD[@]}" 2>/dev/null)"
 
 MD_CMD="$NET_CMD"'|api\.github\.com|poetry install|cargo (build|install)|go mod download|go get '
 report "skills: every network command is allowlisted as gated" \
-  "$(grep -nE -i "$MD_CMD" "${SKILL_MD[@]}" 2>/dev/null)"
+  "$(grep -HnE -i "$MD_CMD" "${SKILL_MD[@]}" 2>/dev/null)"
 
 # The allowlist is only honest if the gate is really there.
 gate_ok=1
@@ -244,7 +258,7 @@ done
 # --- 3. removed things stay removed --------------------------------------
 REMOVED='primeradiant|mintcdn|unsplash|BRAINSTORM_OPEN_CMD|BRAINSTORM_(URL_)?HOST|SUPERPOWERS_BRAND_IMAGE_URL|TELEMETRY_DISABLE_ENV_VARS|0\.0\.0\.0|diagnosing-superpowers|openai-codex-plugins|dangerously-skip-permissions|bypassPermissions'
 report "tree: removed telemetry, remote binds, upstream reporting and permission bypasses stay out" \
-  "$(grep -n -i -E "$REMOVED" "${TREE[@]}" 2>/dev/null)"
+  "$(grep -Hn -i -E "$REMOVED" "${TREE[@]}" 2>/dev/null)"
 # The same names in file paths: a restored skill directory can come back
 # without its name appearing in any file's content.
 report "tree: no file path names a removed component" \

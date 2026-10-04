@@ -244,6 +244,16 @@ test('blocks a click on an off-origin link', () => {
   assert.strictEqual(e.dispatch('auxclick', link).defaultPrevented, true);
 });
 
+test('blocks opening an off-origin link from the context menu or by dragging it', () => {
+  const e = makeEnv(); e.boot();
+  const link = el({ tag: 'a', attrs: { href: OFF_ORIGIN + '/?q=1' } });
+  assert.strictEqual(e.dispatch('contextmenu', link).defaultPrevented, true);
+  assert.strictEqual(e.dispatch('dragstart', link).defaultPrevented, true);
+  const local = el({ tag: 'a', attrs: { href: '/files/mock.png' } });
+  assert.strictEqual(e.dispatch('contextmenu', local).defaultPrevented, false);
+  assert.strictEqual(e.dispatch('dragstart', local).defaultPrevented, false);
+});
+
 test('blocks an SVG link, whose href property is not a string', () => {
   const e = makeEnv(); e.boot();
   const link = el({ tag: 'a', attrs: { href: OFF_ORIGIN + '/' } });

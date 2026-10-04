@@ -12,6 +12,12 @@ These run on a plain Windows Git Bash install and need nothing else:
   resource in skills, every network command in a skill gated and allowlisted,
   and none of the removed telemetry, remote-bind, upstream-reporting or
   permission-bypass code back in the tree. Run it after every upstream merge.
+- `tests/no-egress/test-guard-self.sh` — the guard's own test: it seeds a
+  throwaway repository with paths out (an upper-case `HTTPS://`, an install
+  command, a remote image in an SVG) and checks the guard reports each one.
+- `tests/shell-lint/test-lint-shell.sh` — tests `scripts/lint-shell.sh` with
+  stub tools. Linting the real scripts with that script needs `shellcheck`
+  (and `shfmt` for `--format`).
 - `tests/claude-code/test-worktree-path-policy.sh`,
   `tests/claude-code/test-sdd-workspace.sh`,
   `tests/claude-code/test-executing-plans-scripts.sh` — the SDD and
@@ -31,11 +37,15 @@ These run on a plain Windows Git Bash install and need nothing else:
 ## Other tools
 
 - `tests/version-bump/test-bump-version.sh` — needs `jq` and `yq`.
-- `tests/shell-lint/test-lint-shell.sh` — needs `shellcheck`.
-- `tests/hermes/` — Python tests for the Hermes plugin.
+- `tests/hermes/` — Python tests for the Hermes plugin
+  (`python -m pytest tests/hermes`).
 - `tests/codex/test-marketplace-manifest.sh` — Codex marketplace manifest.
+  Calls `python3`; in Windows Git Bash that name can be the Microsoft Store
+  stub, so put a real Python 3 on PATH under that name first.
 
 ## Calls the model
+
+These need the `claude` CLI on PATH and signed in (`claude auth login`).
 
 - `tests/claude-code/test-subagent-driven-development.sh` runs `claude -p`
   against the installed plugin (not the working tree) and costs tokens. It uses

@@ -163,6 +163,10 @@
   }
   document.addEventListener('click', blockOffOriginLink, true);
   document.addEventListener('auxclick', blockOffOriginLink, true);
+  // "Open link in new tab" from the context menu, and dragging a link onto
+  // the tab strip, fire neither click nor auxclick.
+  document.addEventListener('contextmenu', blockOffOriginLink, true);
+  document.addEventListener('dragstart', blockOffOriginLink, true);
   const nativeOpen = window.open;
   window.open = function(url, ...rest) {
     if (url !== undefined && url !== '' && isOffOrigin(String(url))) return null;

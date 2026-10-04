@@ -5,6 +5,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 START_SCRIPT="$REPO_ROOT/skills/brainstorming/scripts/start-server.sh"
+REAL_NODE="$(command -v node)"
 
 TEST_DIR="${TMPDIR:-/tmp}/brainstorm-start-test-$$"
 passed=0
@@ -106,6 +107,42 @@ if echo "$captured" | grep -q "FOREGROUND_MODE=true"; then
 else
   fail "auto-foregrounds when uname reports a Windows-like shell" \
        "expected foreground node path, got: $captured"
+fi
+
+echo ""
+echo "--- start-server.sh errors are valid JSON ---"
+
+# The agent parses what start-server.sh prints; a raw path or argument with a
+# backslash (any Windows path) or a quote must not break the JSON.
+is_json() { "$REAL_NODE" -e 'JSON.parse(require("fs").readFileSync(0, "utf8"))' <<< "$1" >/dev/null 2>&1; }
+
+bad_arg_out=$(bash "$START_SCRIPT" 'C:\new "dir"' 2>/dev/null || true)
+if is_json "$bad_arg_out"; then
+  pass "unknown-argument error is valid JSON"
+else
+  fail "unknown-argument error is valid JSON" "got: $bad_arg_out"
+fi
+
+# A server that reports started and dies at once takes the "killed" path.
+cat > "$TEST_DIR/fake-bin/node" <<'EOF'
+#!/usr/bin/env bash
+echo '{"type":"server-started"}'
+exit 0
+EOF
+chmod +x "$TEST_DIR/fake-bin/node"
+if command -v cygpath >/dev/null 2>&1; then
+  killed_project="$(cygpath -w "$TEST_DIR/killed")"
+else
+  killed_project="$TEST_DIR/killed \"quoted\" dir"
+fi
+killed_out=$(
+  PATH="$TEST_DIR/fake-bin:$PATH" MSYSTEM="" \
+    bash "$START_SCRIPT" --project-dir "$killed_project" --background 2>/dev/null || true
+)
+if [[ "$killed_out" == *"Server started but was killed"* ]] && is_json "$killed_out"; then
+  pass "server-killed error with the project path is valid JSON"
+else
+  fail "server-killed error with the project path is valid JSON" "got: $killed_out"
 fi
 
 echo ""

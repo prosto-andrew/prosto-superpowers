@@ -136,6 +136,11 @@ function assertStartedOnExpectedPort(out) {
 async function runTests() {
   cleanup();
   fs.mkdirSync(CONTENT_DIR, { recursive: true });
+  // An older .html page, so screen.html stays the newest screen served at /.
+  const pagePath = path.join(CONTENT_DIR, 'page.html');
+  fs.writeFileSync(pagePath, '<html><body><a href="/elsewhere">more</a></body></html>');
+  fs.utimesSync(pagePath, new Date(2000, 0, 1), new Date(2000, 0, 1));
+  fs.writeFileSync(path.join(CONTENT_DIR, 'pic.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><rect width="1" height="1"/></svg>');
   fs.writeFileSync(path.join(CONTENT_DIR, 'screen.html'), '<h2>Secret screen</h2>');
   fs.writeFileSync(path.join(CONTENT_DIR, 'asset.txt'), 'secret asset');
 
@@ -247,6 +252,28 @@ async function runTests() {
       const res = await get('/files/asset.txt', { key: TOKEN });
       assert.strictEqual(res.status, 200);
       assertSecurityHeaders(res.headers);
+    });
+
+    // helper.js refuses off-origin navigation; a page reached through /files
+    // must carry it too, or its links lead off the machine unchecked.
+    await test('an HTML page under /files carries helper.js', async () => {
+      const res = await get('/files/page.html', { key: TOKEN });
+      assert.strictEqual(res.status, 200);
+      assert(res.body.includes('href="/elsewhere"'), 'page content should be served');
+      assert(res.body.includes('blockOffOriginLink'), 'helper.js should be injected');
+      assertSecurityHeaders(res.headers);
+    });
+
+    await test('an SVG under /files is not rendered as a page of its own', async () => {
+      const res = await get('/files/pic.svg', { key: TOKEN });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.headers['content-type'], 'image/svg+xml');
+      assert.strictEqual(res.headers['content-disposition'], 'attachment');
+    });
+
+    await test('other /files assets are served inline', async () => {
+      const res = await get('/files/asset.txt', { key: TOKEN });
+      assert.strictEqual(res.headers['content-disposition'], undefined);
     });
 
     console.log('\n--- WebSocket gate ---');

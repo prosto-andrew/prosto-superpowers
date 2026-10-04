@@ -195,6 +195,12 @@ const frameTemplate = fs.readFileSync(path.join(__dirname, 'frame-template.html'
 const helperScript = fs.readFileSync(path.join(__dirname, 'helper.js'), 'utf-8');
 const helperInjection = '<script>\n' + helperScript + '\n</script>';
 
+function withHelper(html) {
+  return html.includes('</body>')
+    ? html.replace('</body>', helperInjection + '\n</body>')
+    : html + helperInjection;
+}
+
 // ========== Helper Functions ==========
 
 function readSuperpowersVersion() {
@@ -257,14 +263,8 @@ function getNewestScreen() {
   return files.length > 0 ? files[0].path : null;
 }
 
-function urlHostForHttp(host) {
-  const h = String(host);
-  if (h.startsWith('[') && h.endsWith(']')) return h;
-  return h.includes(':') ? '[' + h + ']' : h;
-}
-
 function companionUrl() {
-  return 'http://' + urlHostForHttp(URL_HOST) + ':' + PORT + '/?key=' + TOKEN;
+  return 'http://' + URL_HOST + ':' + PORT + '/?key=' + TOKEN;
 }
 
 function browserLauncherForPlatform(url, {
@@ -409,18 +409,12 @@ function handleRequest(req, res) {
     res.end(bootstrapPage(keyFromQuery));
   } else if (req.method === 'GET' && pathname === '/') {
     const screenFile = getNewestScreen();
-    let html = screenFile
+    const html = screenFile
       ? (raw => isFullDocument(raw) ? raw : wrapInFrame(raw))(fs.readFileSync(screenFile, 'utf-8'))
       : waitingPage();
 
-    if (html.includes('</body>')) {
-      html = html.replace('</body>', helperInjection + '\n</body>');
-    } else {
-      html += helperInjection;
-    }
-
     res.writeHead(200, securityHeaders({ 'Content-Type': 'text/html; charset=utf-8' }));
-    res.end(html);
+    res.end(withHelper(html));
   } else if (req.method === 'GET' && pathname.startsWith('/files/')) {
     const fileName = path.basename(pathname.slice(7));
     const filePath = path.join(CONTENT_DIR, fileName);
@@ -432,8 +426,19 @@ function handleRequest(req, res) {
       return;
     }
     const ext = path.extname(filePath).toLowerCase();
+    // Every page the companion renders carries helper.js, whose link blocker
+    // keeps navigation on this machine — pages reached through /files too.
+    if (ext === '.html') {
+      res.writeHead(200, securityHeaders({ 'Content-Type': 'text/html; charset=utf-8' }));
+      res.end(withHelper(fs.readFileSync(filePath, 'utf-8')));
+      return;
+    }
+    // An SVG opened on its own is a document with live links and no helper.
+    // As an <img> or CSS image, which is what /files serves it for, the
+    // browser ignores Content-Disposition.
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    res.writeHead(200, securityHeaders({ 'Content-Type': contentType }));
+    const disposition = ext === '.svg' ? { 'Content-Disposition': 'attachment' } : {};
+    res.writeHead(200, securityHeaders({ 'Content-Type': contentType, ...disposition }));
     res.end(fs.readFileSync(filePath));
   } else {
     res.writeHead(404, securityHeaders());

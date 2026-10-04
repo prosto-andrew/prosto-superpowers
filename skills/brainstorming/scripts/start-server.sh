@@ -19,6 +19,13 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Escape a value for a JSON string: the agent parses what this prints, and a
+# Windows path (C:\Users\...) or a quote would otherwise break it.
+json_escape() {
+  local s=${1//\\/\\\\}
+  printf '%s' "${s//\"/\\\"}"
+}
+
 # Parse arguments
 PROJECT_DIR=""
 FOREGROUND="false"
@@ -47,7 +54,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "{\"error\": \"Unknown argument: $1\"}"
+      echo "{\"error\": \"Unknown argument: $(json_escape "$1")\"}"
       exit 1
       ;;
   esac
@@ -184,7 +191,8 @@ for _ in {1..50}; do
       sleep 0.1
     done
     if [[ "$alive" != "true" ]]; then
-      echo "{\"error\": \"Server started but was killed. Retry in a persistent terminal with: $SCRIPT_DIR/start-server.sh${PROJECT_DIR:+ --project-dir $PROJECT_DIR} --foreground\"}"
+      retry="$SCRIPT_DIR/start-server.sh${PROJECT_DIR:+ --project-dir $PROJECT_DIR} --foreground"
+      echo "{\"error\": \"Server started but was killed. Retry in a persistent terminal with: $(json_escape "$retry")\"}"
       exit 1
     fi
     grep "server-started" "$LOG_FILE" | head -1
